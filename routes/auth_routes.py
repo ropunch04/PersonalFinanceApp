@@ -6,7 +6,13 @@ from flask import Blueprint, g, request
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
-from models.user import create_user, get_user_by_email, get_user_by_id, get_user_by_username
+from models.user import (
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_by_username,
+    update_password,
+)
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -75,6 +81,28 @@ def login():
             },
         }
     }
+
+
+@bp.post("/change-password")
+@require_auth
+def change_password():
+    body = request.get_json(silent=True) or {}
+    current_password = body.get("current_password", "")
+    new_password = body.get("new_password", "")
+
+    if not current_password or not new_password:
+        return {"error": "current_password and new_password are required"}, 400
+
+    if len(new_password) < 8:
+        return {"error": "new_password must be at least 8 characters"}, 400
+
+    row = get_user_by_id(g.current_user["user_id"])
+    if not row or not bcrypt.checkpw(current_password.encode(), row["password_hash"].encode()):
+        return {"error": "Current password is incorrect"}, 400
+
+    new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    update_password(g.current_user["user_id"], new_hash)
+    return {"data": {"success": True}}
 
 
 @bp.get("/me")

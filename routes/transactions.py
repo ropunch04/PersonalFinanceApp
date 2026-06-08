@@ -34,22 +34,32 @@ def list_transactions():
 
     try:
         category_id = request.args.get("category_id", type=int)
-        limit = request.args.get("limit", default=50, type=int)
+        limit = min(request.args.get("limit", default=25, type=int), 200)
+        offset = max(request.args.get("offset", default=0, type=int), 0)
     except (TypeError, ValueError):
         return _err("Invalid query parameters", 400)
 
     if category_id is not None:
+        total = db.execute(
+            "SELECT COUNT(*) FROM transactions WHERE category_id = ?", (category_id,)
+        ).fetchone()[0]
         rows = db.execute(
-            _TXN_SELECT + "WHERE t.category_id = ? ORDER BY t.transaction_at DESC LIMIT ?",
-            (category_id, limit),
+            _TXN_SELECT + "WHERE t.category_id = ? ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
+            (category_id, limit, offset),
         ).fetchall()
     else:
+        total = db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         rows = db.execute(
-            _TXN_SELECT + "ORDER BY t.transaction_at DESC LIMIT ?",
-            (limit,),
+            _TXN_SELECT + "ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
 
-    return _ok([_row_to_dict(r) for r in rows])
+    return _ok({
+        "transactions": [_row_to_dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @bp.post("/transactions")

@@ -28,6 +28,13 @@ export default function Profile() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
 
+  // Password change state
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwMsg, setPwMsg] = useState(null);
+
   useEffect(() => {
     api.getProfile()
       .then((data) => {
@@ -93,6 +100,27 @@ export default function Profile() {
     }
   }
 
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (newPw !== confirmPw) {
+      setPwMsg("Error: New passwords do not match");
+      return;
+    }
+    setChangingPw(true);
+    try {
+      await api.changePassword(currentPw, newPw);
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+      setPwMsg("Password changed successfully.");
+    } catch (err) {
+      setPwMsg(`Error: ${err.message}`);
+    } finally {
+      setChangingPw(false);
+    }
+  }
+
   function handleSignOut() {
     api.logout();
     logout();
@@ -106,7 +134,6 @@ export default function Profile() {
     <div className="profile-page">
       <h1>Profile</h1>
 
-      {/* Budget Settings */}
       <section className="profile-section">
         <h2>Budget Settings</h2>
         <form onSubmit={handleSaveBudget}>
@@ -171,7 +198,6 @@ export default function Profile() {
         </form>
       </section>
 
-      {/* Gmail Sync */}
       <section className="profile-section">
         <h2>Gmail Sync</h2>
         {profile.last_synced_at && (
@@ -208,6 +234,44 @@ export default function Profile() {
           </button>
           {syncMsg && <p className={syncMsg.startsWith("Error") ? "error" : "success"}>{syncMsg}</p>}
         </div>
+      </section>
+
+      <section className="profile-section">
+        <h2>Change Password</h2>
+        <form onSubmit={handleChangePassword}>
+          <label>
+            Current Password
+            <input
+              type="password"
+              value={currentPw}
+              onChange={(e) => setCurrentPw(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            New Password
+            <input
+              type="password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+          <label>
+            Confirm New Password
+            <input
+              type="password"
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              required
+            />
+          </label>
+          {pwMsg && <p className={pwMsg.startsWith("Error") ? "error" : "success"}>{pwMsg}</p>}
+          <button type="submit" disabled={changingPw}>
+            {changingPw ? "Changing..." : "Change Password"}
+          </button>
+        </form>
       </section>
 
       <section className="profile-section">

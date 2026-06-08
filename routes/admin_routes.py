@@ -49,9 +49,6 @@ def _user_with_finance(user: dict) -> dict:
     return user
 
 
-# ── Users ────────────────────────────────────────────────────────────────────
-
-
 @admin_bp.get("/users")
 @require_auth
 @require_admin
@@ -151,9 +148,6 @@ def sync_user(user_id):
     return _ok(result)
 
 
-# ── System ───────────────────────────────────────────────────────────────────
-
-
 @admin_bp.get("/system")
 @require_auth
 @require_admin
@@ -167,9 +161,6 @@ def system_info():
             "platform": sys.platform,
         }
     )
-
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
 
 
 @admin_bp.get("/logs")

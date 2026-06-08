@@ -208,7 +208,6 @@ export default function Admin() {
     <div className="admin-page">
       <h1>Admin</h1>
 
-      {/* System Info */}
       {system && (
         <section className="admin-section">
           <h2>System</h2>
@@ -221,7 +220,6 @@ export default function Admin() {
         </section>
       )}
 
-      {/* Users */}
       <section className="admin-section">
         <h2>Users</h2>
         <CreateUserForm
@@ -254,7 +252,6 @@ export default function Admin() {
         </table>
       </section>
 
-      {/* Logs */}
       <section className="admin-section">
         <h2>Logs</h2>
         <div className="logs-header">

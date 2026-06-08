@@ -35,6 +35,8 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/api/transactions${qs ? `?${qs}` : ""}`);
   },
+  changePassword: (current_password, new_password) =>
+    request("POST", "/api/auth/change-password", { current_password, new_password }),
   createTransaction: (data) => request("POST", "/api/transactions", data),
   updateTransaction: (id, data) =>
     request("PUT", `/api/transactions/${id}`, data),
