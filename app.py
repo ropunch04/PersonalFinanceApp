@@ -3,7 +3,7 @@ import os
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from flask import Flask, g
+from flask import Flask, g, send_from_directory
 
 import config
 from models.user import init_master_db
@@ -17,6 +17,8 @@ from routes.transactions import bp as transactions_bp
 from services.sync_service import scheduled_sync_all
 
 load_dotenv()
+
+DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
@@ -37,9 +39,13 @@ def close_user_db(_):
         db.close()
 
 
-@app.get("/")
-def index():
-    return {"status": "ok"}
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
+def spa(path):
+    full = os.path.join(DIST_DIR, path)
+    if path and os.path.isfile(full):
+        return send_from_directory(DIST_DIR, path)
+    return send_from_directory(DIST_DIR, "index.html")
 
 
 if os.environ.get("RUN_SCHEDULER", "false").lower() == "true":

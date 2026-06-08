@@ -17,7 +17,7 @@ def _err(message, status):
 
 def _fetch_profile(conn) -> dict:
     row = conn.execute(
-        "SELECT monthly_income, savings_target FROM profile WHERE id = 1"
+        "SELECT monthly_income, savings_target, gmail_address, last_synced_at FROM profile WHERE id = 1"
     ).fetchone()
     budgets = conn.execute(
         """
@@ -30,6 +30,9 @@ def _fetch_profile(conn) -> dict:
     return {
         "monthly_income": row["monthly_income"] if row else 0,
         "savings_target": row["savings_target"] if row else 0,
+        "gmail_address": row["gmail_address"] if row else None,
+        "gmail_configured": bool(row["gmail_address"]) if row else False,
+        "last_synced_at": row["last_synced_at"] if row else None,
         "budgets": [dict(b) for b in budgets],
     }
 
