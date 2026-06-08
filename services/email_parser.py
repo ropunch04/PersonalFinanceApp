@@ -10,21 +10,23 @@ from bs4 import BeautifulSoup
 _IMAP_HOST = "imap.gmail.com"
 _IMAP_PORT = 993
 
-_PROVIDERS = [
-    (b'FROM "info@capitalone.com"',  "_parse_capitalone"),
-    (b'FROM "venmo@venmo.com"',      "_parse_venmo_email"),
-]
-
-_CAP1_AMOUNT  = re.compile(r"\$\s*([\d,]+\.\d{2})")
+_CAP1_AMOUNT   = re.compile(r"\$\s*([\d,]+\.\d{2})")
 _CAP1_MERCHANT = re.compile(
     r"(?:at|from|purchase at|used at|charged at)\s+([A-Z0-9][^\n\r.,]{2,50}?)(?=\s+on\s|\s+for\s|\.|,|$)",
     re.IGNORECASE,
 )
 _CAP1_DATE = re.compile(
-    r"(\w+ \d{1,2},\s*\d{4})"          # e.g. "May 12, 2026"
-    r"|(\d{4}-\d{2}-\d{2})"            # e.g. "2026-05-12"
-    r"|(\d{1,2}/\d{1,2}/\d{4})"        # e.g. "05/12/2026"
+    r"(\w+ \d{1,2},\s*\d{4})" 
+    r"|(\d{4}-\d{2}-\d{2})"
+    r"|(\d{1,2}/\d{1,2}/\d{4})"
+    r"|(\w+\.\s*\d{1,2},?\s*\d{4})"
 )
+
+_CREDIT_PHRASES = ("credit has posted", "credited your account for", "is in your account now")
+_CREDIT_AMOUNT_SPECIFIC = re.compile(r"credited your account for \$([0-9,]+\.\d{2})", re.IGNORECASE)
+_CREDIT_AMOUNT_FALLBACK  = re.compile(r"\+\$([0-9,]+\.\d{2})")
+_CREDIT_MERCHANT = re.compile(r"([A-Z][A-Z\s\*\-0-9]+)\n.*Card\.\.\.", re.IGNORECASE)
+_CREDIT_DATE = re.compile(r"(\w+\.\s*\d{1,2},?\s*\d{4})")
 
 _VENMO_PAID   = re.compile(r"paid you \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
 _VENMO_CHARGE = re.compile(r"you paid (?:.+?) \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
@@ -38,7 +40,6 @@ def _source_hash(provider: str, message_id: str) -> str:
 
 
 def _get_text(msg: Message) -> str:
-    """Walk a (possibly multipart) email and return the best text body."""
     plain, html = None, None
     for part in msg.walk():
         ct = part.get_content_type()
@@ -53,7 +54,6 @@ def _get_text(msg: Message) -> str:
             plain = decoded
         elif ct == "text/html" and html is None:
             html = decoded
-
     if plain:
         return plain
     if html:
@@ -61,20 +61,20 @@ def _get_text(msg: Message) -> str:
     return ""
 
 
-def _parse_date(text: str) -> str:
-    """Try several date formats; fall back to current UTC time."""
+def _parse_cap1_date(text: str) -> str:
     m = _CAP1_DATE.search(text)
     if m:
-        raw = next(g for g in m.groups() if g)
-        for fmt in ("%B %d, %Y", "%B %d,%Y", "%Y-%m-%d", "%m/%d/%Y"):
+        raw = next(g for g in m.groups() if g).strip()
+        cleaned = raw.replace(".", "").replace(",", "")  # "May. 26 2026" → "May 26 2026"
+        for fmt in ("%B %d %Y", "%b %d %Y", "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
             try:
-                return datetime.strptime(raw.strip(), fmt).strftime("%Y-%m-%dT00:00:00")
+                return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%dT00:00:00")
             except ValueError:
                 continue
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
 
 
-def _parse_capitalone(msg: Message, message_id: str, conn) -> dict | None:
+def _parse_charge_email(msg: Message, message_id: str, conn) -> dict | None:
     subject = msg.get("Subject", "")
     if not re.search(r"transaction|purchase|charge|alert", subject, re.IGNORECASE):
         return None
@@ -89,18 +89,49 @@ def _parse_capitalone(msg: Message, message_id: str, conn) -> dict | None:
     merchant_m = _CAP1_MERCHANT.search(text)
     merchant_raw = merchant_m.group(1).strip() if merchant_m else subject
 
-    direction = "inflow" if re.search(r"credit|refund|return", subject, re.IGNORECASE) else "outflow"
+    return {
+        "amount":         amount,
+        "direction":      "outflow",
+        "merchant_raw":   merchant_raw,
+        "category_id":    _get_category_id(conn, merchant_raw) if conn else None,
+        "transaction_at": _parse_cap1_date(text),
+        "source_hash":    _source_hash("capitalone_charge", message_id),
+        "notes":          None,
+    }
 
-    transaction_at = _parse_date(text)
-    category_id = _get_category_id(conn, merchant_raw) if conn else None
+
+def _parse_credit_email(msg: Message, message_id: str, conn) -> dict | None:
+    text = _get_text(msg)
+
+    if not any(phrase in text.lower() for phrase in _CREDIT_PHRASES):
+        return None
+
+    amount_m = _CREDIT_AMOUNT_SPECIFIC.search(text) or _CREDIT_AMOUNT_FALLBACK.search(text)
+    if not amount_m:
+        return None
+    amount = float(amount_m.group(1).replace(",", ""))
+
+    merchant_m = _CREDIT_MERCHANT.search(text)
+    merchant_raw = merchant_m.group(1).strip() if merchant_m else msg.get("Subject", "Refund")
+
+    date_m = _CREDIT_DATE.search(text)
+    if date_m:
+        raw = date_m.group(1).strip().replace(".", "").replace(",", "")
+        try:
+            transaction_at = datetime.strptime(raw, "%b %d %Y").strftime("%Y-%m-%dT00:00:00")
+        except ValueError:
+            transaction_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    else:
+        transaction_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
 
     return {
         "amount":         amount,
-        "direction":      direction,
+        "direction":      "inflow",
         "merchant_raw":   merchant_raw,
-        "category_id":    category_id,
+        "category_id":    _get_category_id(conn, merchant_raw) if conn else None,
         "transaction_at": transaction_at,
-        "source_hash":    _source_hash("capitalone_email", message_id),
+        "source_hash":    _source_hash("capitalone_credit", message_id),
+        "notes":          "Refund",
     }
 
 
@@ -127,16 +158,14 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
     else:
         return None
 
-    transaction_at = _parse_date(text)
-    category_id = _get_category_id(conn, merchant_raw) if conn else None
-
     return {
         "amount":         amount,
         "direction":      direction,
         "merchant_raw":   merchant_raw,
-        "category_id":    category_id,
-        "transaction_at": transaction_at,
+        "category_id":    _get_category_id(conn, merchant_raw) if conn else None,
+        "transaction_at": _parse_cap1_date(text),
         "source_hash":    _source_hash("venmo_email", message_id),
+        "notes":          None,
     }
 
 
@@ -150,12 +179,6 @@ def _get_category_id(conn, merchant_raw: str) -> int | None:
     return other["id"] if other else None
 
 
-_PARSER_FNS = {
-    "_parse_capitalone":  _parse_capitalone,
-    "_parse_venmo_email": _parse_venmo_email,
-}
-
-
 def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list[dict], list[dict]]:
     transactions, errors = [], []
 
@@ -164,8 +187,13 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
         mail.login(gmail_address, app_password)
         mail.select("INBOX")
 
-        for criteria, parser_name in _PROVIDERS:
-            parse_fn = _PARSER_FNS[parser_name]
+        searches = [
+            (b'FROM "capitalone.com" SUBJECT "transaction"', None),
+            (b'FROM "capitalone.com" SUBJECT "credit"',      None),
+            (b'FROM "venmo@venmo.com"',                      _parse_venmo_email),
+        ]
+
+        for criteria, fixed_parser in searches:
             _, msg_nums = mail.search(None, b"UNSEEN", criteria)
             ids = msg_nums[0].split()
             if not ids:
@@ -178,6 +206,15 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
                     msg = message_from_bytes(raw)
                     message_id = msg.get("Message-ID", num.decode())
 
+                    if fixed_parser:
+                        parse_fn = fixed_parser
+                    else:
+                        text = _get_text(msg)
+                        if any(phrase in text.lower() for phrase in _CREDIT_PHRASES):
+                            parse_fn = _parse_credit_email
+                        else:
+                            parse_fn = _parse_charge_email
+
                     result = parse_fn(msg, message_id, conn)
                     if result:
                         transactions.append(result)
@@ -189,10 +226,7 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
                             "subject": msg.get("Subject", ""),
                         })
                 except Exception as exc:
-                    errors.append({
-                        "message_id": num.decode(),
-                        "reason": str(exc),
-                    })
+                    errors.append({"message_id": num.decode(), "reason": str(exc)})
     finally:
         try:
             mail.logout()
