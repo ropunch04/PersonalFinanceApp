@@ -2,6 +2,7 @@ import bcrypt
 from flask import Blueprint, g, request
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
+from db_context import init_user_db
 from models.user import create_user, get_user_by_username
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -28,6 +29,7 @@ def register():
     except Exception:
         return {"error": "Registration failed"}, 500
 
+    init_user_db(user_id)
     token = encode_token(user_id, username, is_admin=False)
     return {"token": token, "user": {"id": user_id, "username": username, "email": email, "is_admin": False}}, 201
 
@@ -45,6 +47,7 @@ def login():
     if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
         return _GENERIC_LOGIN_ERROR, 401
 
+    init_user_db(row["id"])
     token = encode_token(row["id"], row["username"], bool(row["is_admin"]))
     return {
         "token": token,
