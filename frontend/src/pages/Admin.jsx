@@ -9,6 +9,7 @@ function formatUptime(seconds) {
 }
 
 function UserRow({ user, currentUserId, onUpdated, onDeleted }) {
+  const [expanded, setExpanded] = useState(false);
   const [resetPw, setResetPw] = useState("");
   const [showReset, setShowReset] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
@@ -68,57 +69,83 @@ function UserRow({ user, currentUserId, onUpdated, onDeleted }) {
   const isSelf = user.id === currentUserId;
 
   return (
-    <>
-      <tr>
-        <td>{user.username}</td>
-        <td>{user.email}</td>
-        <td>{user.is_admin ? "Admin" : "User"}</td>
-        <td>{user.last_synced_at ? new Date(user.last_synced_at).toLocaleDateString() : "—"}</td>
-        <td>{user.gmail_configured ? "Yes" : "No"}</td>
-        <td className="user-actions">
-          <button onClick={() => setShowReset((v) => !v)} disabled={busy}>
-            Reset PW
+    <div className="admin-user-row">
+      <div className="admin-user-top">
+        <div>
+          <div className="admin-user-name">
+            {user.username}
+            {user.is_admin && <span className="admin-badge" style={{ marginLeft: 6 }}>Admin</span>}
+          </div>
+          <div className="admin-user-meta">{user.email || "—"}</div>
+        </div>
+        <div className="admin-user-actions">
+          <button className="btn-icon" title="Expand" onClick={() => setExpanded((v) => !v)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {expanded ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+            </svg>
           </button>
           {!isSelf && (
-            <button onClick={handleToggleAdmin} disabled={busy}>
-              {user.is_admin ? "Revoke Admin" : "Make Admin"}
+            <button className="btn-icon danger" title="Delete user" onClick={handleDelete} disabled={busy}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14H6L5 6" />
+                <path d="M10 11v6M14 11v6" />
+              </svg>
             </button>
           )}
-          <button onClick={handleSync} disabled={busy || !user.gmail_configured}>
-            Sync
-          </button>
-          {!isSelf && (
-            <button className="delete-btn" onClick={handleDelete} disabled={busy}>
-              Delete
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="admin-user-expanded">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {!isSelf && (
+              <button className="btn btn-ghost btn-sm" onClick={handleToggleAdmin} disabled={busy}>
+                {user.is_admin ? "Revoke Admin" : "Make Admin"}
+              </button>
+            )}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleSync}
+              disabled={busy || !user.gmail_configured}
+            >
+              Sync Gmail
             </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowReset((v) => !v)}
+            >
+              {showReset ? "Cancel" : "Reset PW"}
+            </button>
+          </div>
+
+          {syncMsg && (
+            <div className={`msg ${syncMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+              {syncMsg}
+            </div>
           )}
-        </td>
-      </tr>
-      {showReset && (
-        <tr>
-          <td colSpan={6}>
+
+          {showReset && (
             <form className="inline-form" onSubmit={handleResetPassword}>
               <input
                 type="password"
-                placeholder="New password"
+                placeholder="New password (min 8 chars)"
                 value={resetPw}
                 onChange={(e) => setResetPw(e.target.value)}
                 required
+                minLength={8}
               />
-              <button type="submit" disabled={busy}>Save</button>
-              <button type="button" onClick={() => setShowReset(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>Save</button>
             </form>
-          </td>
-        </tr>
+          )}
+
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            Gmail: {user.gmail_configured ? "configured" : "not set"} ·
+            Last synced: {user.last_synced_at ? new Date(user.last_synced_at).toLocaleDateString() : "never"}
+          </div>
+        </div>
       )}
-      {syncMsg && (
-        <tr>
-          <td colSpan={6}>
-            <span className={syncMsg.startsWith("Error") ? "error" : "success"}>{syncMsg}</span>
-          </td>
-        </tr>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -148,20 +175,28 @@ function CreateUserForm({ onCreated }) {
   }
 
   return (
-    <form className="create-user-form" onSubmit={handleSubmit}>
+    <div className="create-user-form">
       <h3>Create User</h3>
-      <div className="form-row">
-        <input name="username" placeholder="Username" value={form.username} onChange={handleChange} required />
-        <input name="email" type="email" placeholder="Email" value={form.email} onChange={handleChange} required />
-        <input name="password" type="password" placeholder="Password" value={form.password} onChange={handleChange} required />
-        <label className="checkbox-label">
-          <input name="is_admin" type="checkbox" checked={form.is_admin} onChange={handleChange} />
-          Admin
-        </label>
-        <button type="submit" disabled={busy}>{busy ? "Creating..." : "Create"}</button>
-      </div>
-      {error && <p className="error">{error}</p>}
-    </form>
+      <form onSubmit={handleSubmit}>
+        <div className="form-stack">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <input name="username" placeholder="Username" value={form.username} onChange={handleChange} required />
+            <input name="email" type="email" placeholder="Email" value={form.email} onChange={handleChange} required />
+          </div>
+          <input name="password" type="password" placeholder="Password (min 8 chars)" value={form.password} onChange={handleChange} required minLength={8} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <label className="checkbox-label">
+              <input name="is_admin" type="checkbox" checked={form.is_admin} onChange={handleChange} />
+              Admin
+            </label>
+            <button className="btn btn-secondary btn-sm" type="submit" disabled={busy}>
+              {busy ? "Creating…" : "Create"}
+            </button>
+          </div>
+          {error && <div className="msg msg-error">{error}</div>}
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -173,13 +208,12 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Read current user id from token payload
   const token = localStorage.getItem("finance_token");
   let currentUserId = null;
   try {
     currentUserId = JSON.parse(atob(token.split(".")[1])).sub;
   } catch {
-    // token missing or malformed — currentUserId stays null
+    // token missing or malformed
   }
 
   useEffect(() => {
@@ -201,71 +235,64 @@ export default function Admin() {
     }
   }
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p className="error">{error}</p>;
+  if (loading) return <div className="top-bar-loading" />;
+  if (error) return (
+    <div className="page">
+      <div className="page-header"><h1>Admin</h1></div>
+      <div className="msg msg-error">{error}</div>
+    </div>
+  );
 
   return (
-    <div className="admin-page">
-      <h1>Admin</h1>
+    <div className="page">
+      <div className="page-header"><h1>Admin</h1></div>
 
       {system && (
-        <section className="admin-section">
-          <h2>System</h2>
-          <div className="system-grid">
-            <span>Uptime</span><span>{formatUptime(system.uptime_seconds)}</span>
-            <span>Users</span><span>{system.user_count}</span>
-            <span>Platform</span><span>{system.platform}</span>
-            <span>Python</span><span>{system.python_version.split(" ")[0]}</span>
+        <div className="admin-section">
+          <p className="section-label">System</p>
+          <div className="card">
+            <dl className="system-grid">
+              <dt>Uptime</dt><dd>{formatUptime(system.uptime_seconds)}</dd>
+              <dt>Users</dt><dd>{system.user_count}</dd>
+              <dt>Platform</dt><dd>{system.platform}</dd>
+              <dt>Python</dt><dd>{system.python_version.split(" ")[0]}</dd>
+            </dl>
           </div>
-        </section>
+        </div>
       )}
 
-      <section className="admin-section">
-        <h2>Users</h2>
-        <CreateUserForm
-          onCreated={(u) => setUsers((prev) => [...prev, u])}
-        />
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Last Synced</th>
-              <th>Gmail</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <UserRow
-                key={u.id}
-                user={u}
-                currentUserId={currentUserId}
-                onUpdated={(updated) =>
-                  setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
-                }
-                onDeleted={(id) => setUsers((prev) => prev.filter((x) => x.id !== id))}
-              />
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <div className="admin-section">
+        <p className="section-label">Users</p>
+        <CreateUserForm onCreated={(u) => setUsers((prev) => [...prev, u])} />
+        <div className="card admin-user-list">
+          {users.map((u) => (
+            <UserRow
+              key={u.id}
+              user={u}
+              currentUserId={currentUserId}
+              onUpdated={(updated) =>
+                setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+              }
+              onDeleted={(id) => setUsers((prev) => prev.filter((x) => x.id !== id))}
+            />
+          ))}
+        </div>
+      </div>
 
-      <section className="admin-section">
-        <h2>Logs</h2>
-        <div className="logs-header">
-          <button onClick={loadLogs} disabled={logsLoading}>
-            {logsLoading ? "Loading..." : logs ? "Refresh" : "Load Logs"}
+      <div className="admin-section">
+        <p className="section-label">Logs</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+          <button className="btn btn-secondary btn-sm" onClick={loadLogs} disabled={logsLoading}>
+            {logsLoading ? "Loading…" : logs ? "Refresh" : "Load Logs"}
           </button>
-          {logs && <span>{logs.total_lines} total lines</span>}
+          {logs && <span className="text-muted" style={{ fontSize: 12 }}>{logs.total_lines} total lines</span>}
         </div>
         {logs && (
-          <pre className="log-box">
+          <div className="log-box">
             {logs.lines.length > 0 ? logs.lines.join("\n") : "No log entries."}
-          </pre>
+          </div>
         )}
-      </section>
+      </div>
     </div>
   );
 }

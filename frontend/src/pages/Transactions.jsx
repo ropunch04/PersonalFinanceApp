@@ -23,6 +23,17 @@ function txnToForm(t) {
   };
 }
 
+function fmtAmt(t) {
+  const sign = t.direction === "inflow" ? "+" : "-";
+  const n = parseFloat(t.amount).toFixed(2);
+  return `${sign}$${n}`;
+}
+
+function fmtDate(s) {
+  if (!s) return "";
+  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   const [form, setForm] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
@@ -50,66 +61,56 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   }
 
   return (
-    <form className="txn-form" onSubmit={handleSubmit}>
-      <label>
-        Date
-        <input type="date" name="transaction_at" value={form.transaction_at} onChange={handleChange} required />
-      </label>
-      <label>
-        Merchant
+    <form className="txn-form-grid" onSubmit={handleSubmit}>
+      <div className="txn-form-row">
+        <div className="field">
+          <label className="field-label">Date</label>
+          <input type="date" name="transaction_at" value={form.transaction_at} onChange={handleChange} required />
+        </div>
+        <div className="field">
+          <label className="field-label">Amount</label>
+          <input type="number" name="amount" value={form.amount} onChange={handleChange} step="0.01" min="0" required placeholder="0.00" />
+        </div>
+      </div>
+
+      <div className="field">
+        <label className="field-label">Merchant</label>
         <input type="text" name="merchant_raw" value={form.merchant_raw} onChange={handleChange} placeholder="e.g. Whole Foods" />
-      </label>
-      <label>
-        Amount
-        <input type="number" name="amount" value={form.amount} onChange={handleChange} step="0.01" min="0" required />
-      </label>
-      <label>
-        Direction
-        <select name="direction" value={form.direction} onChange={handleChange}>
-          <option value="outflow">Debit (outflow)</option>
-          <option value="inflow">Credit (inflow)</option>
-        </select>
-      </label>
-      <label>
-        Category
-        <select name="category_id" value={form.category_id} onChange={handleChange}>
-          <option value="">— None —</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Notes
+      </div>
+
+      <div className="txn-form-row">
+        <div className="field">
+          <label className="field-label">Direction</label>
+          <select name="direction" value={form.direction} onChange={handleChange}>
+            <option value="outflow">Debit</option>
+            <option value="inflow">Credit</option>
+          </select>
+        </div>
+        <div className="field">
+          <label className="field-label">Category</label>
+          <select name="category_id" value={form.category_id} onChange={handleChange}>
+            <option value="">None</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="field">
+        <label className="field-label">Notes</label>
         <input type="text" name="notes" value={form.notes} onChange={handleChange} />
-      </label>
-      {error && <p className="error">{error}</p>}
+      </div>
+
+      {error && <div className="msg msg-error">{error}</div>}
+
       <div className="form-actions">
-        <button type="submit" disabled={submitting}>{submitting ? "Saving..." : submitLabel}</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary" type="submit" disabled={submitting} style={{ flex: 1 }}>
+          {submitting ? "Saving…" : submitLabel}
+        </button>
+        <button className="btn btn-ghost" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
-  );
-}
-
-function EditRow({ txn, categories, onSaved, onCancel }) {
-  async function handleSave(payload) {
-    const updated = await api.updateTransaction(txn.id, payload);
-    onSaved(updated);
-  }
-
-  return (
-    <tr>
-      <td colSpan={7}>
-        <TxnForm
-          initial={txnToForm(txn)}
-          categories={categories}
-          onSave={handleSave}
-          onCancel={onCancel}
-          submitLabel="Save"
-        />
-      </td>
-    </tr>
   );
 }
 
@@ -122,18 +123,33 @@ export default function Transactions() {
   const [error, setError] = useState(null);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
 
+  // Filter state
+  const [filterCat, setFilterCat] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  function buildParams(p) {
+    const params = { limit: PAGE_SIZE, offset: p * PAGE_SIZE };
+    if (filterCat) params.category_id = parseInt(filterCat);
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    return params;
+  }
 
   function fetchPage(p) {
     setLoading(true);
     setError(null);
-    api.getTransactions({ limit: PAGE_SIZE, offset: p * PAGE_SIZE })
+    api.getTransactions(buildParams(p))
       .then((data) => {
         setTransactions(data.transactions);
         setTotal(data.total);
         setPage(p);
+        setExpandedId(null);
         setEditingId(null);
       })
       .catch((e) => setError(e.message))
@@ -154,19 +170,35 @@ export default function Transactions() {
       .finally(() => setLoading(false));
   }, []);
 
+  function applyFilters() {
+    setPage(0);
+    setLoading(true);
+    setError(null);
+    const params = { limit: PAGE_SIZE, offset: 0 };
+    if (filterCat) params.category_id = parseInt(filterCat);
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    api.getTransactions(params)
+      .then((data) => {
+        setTransactions(data.transactions);
+        setTotal(data.total);
+        setExpandedId(null);
+        setEditingId(null);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }
+
   async function handleCreate(payload) {
-    const created = await api.createTransaction(payload);
-    // Created transaction is most recent — go to first page to show it
+    await api.createTransaction(payload);
     setShowCreate(false);
     fetchPage(0);
-    return created;
   }
 
   async function handleDelete(id) {
     if (!confirm("Delete this transaction?")) return;
     try {
       await api.deleteTransaction(id);
-      // Refresh current page; if it becomes empty go back one
       const newTotal = total - 1;
       const maxPage = Math.max(0, Math.ceil(newTotal / PAGE_SIZE) - 1);
       fetchPage(Math.min(page, maxPage));
@@ -178,79 +210,125 @@ export default function Transactions() {
   function handleSaved(updated) {
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
     setEditingId(null);
+    setExpandedId(updated.id);
+  }
+
+  function toggleRow(id) {
+    if (editingId === id) return;
+    setExpandedId((prev) => (prev === id ? null : id));
   }
 
   return (
-    <div className="transactions-page">
+    <div className="page">
+      {loading && <div className="top-bar-loading" />}
+
       <div className="page-header">
         <h1>Transactions</h1>
-        <button onClick={() => { setShowCreate((v) => !v); setEditingId(null); }}>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => { setShowCreate((v) => !v); setExpandedId(null); setEditingId(null); }}
+        >
           {showCreate ? "Cancel" : "+ New"}
         </button>
       </div>
 
       {showCreate && (
-        <TxnForm
-          initial={EMPTY_FORM}
-          categories={categories}
-          onSave={handleCreate}
-          onCancel={() => setShowCreate(false)}
-          submitLabel="Create"
-        />
+        <div className="txn-form-wrap card" style={{ marginBottom: 12 }}>
+          <TxnForm
+            initial={EMPTY_FORM}
+            categories={categories}
+            onSave={handleCreate}
+            onCancel={() => setShowCreate(false)}
+            submitLabel="Create"
+          />
+        </div>
       )}
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : error ? (
-        <p className="error">{error}</p>
-      ) : transactions.length === 0 ? (
-        <p>No transactions yet.</p>
-      ) : (
+      {/* Filter bar */}
+      <div className="filter-bar">
+        <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+      </div>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={applyFilters}>
+        Apply
+      </button>
+
+      {error && <div className="msg msg-error">{error}</div>}
+
+      {!loading && transactions.length === 0 && !error && (
+        <div className="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="2" y="5" width="20" height="14" rx="2" />
+            <path d="M2 10h20" />
+          </svg>
+          No transactions found
+        </div>
+      )}
+
+      {transactions.length > 0 && (
         <>
-          <table className="txn-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Merchant</th>
-                <th>Amount</th>
-                <th>Category</th>
-                <th>Direction</th>
-                <th>Notes</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((t) =>
-                editingId === t.id ? (
-                  <EditRow
-                    key={t.id}
-                    txn={t}
-                    categories={categories}
-                    onSaved={handleSaved}
-                    onCancel={() => setEditingId(null)}
-                  />
-                ) : (
-                  <tr key={t.id}>
-                    <td>{t.transaction_at?.slice(0, 10)}</td>
-                    <td>{t.merchant_raw || "—"}</td>
-                    <td>${parseFloat(t.amount).toFixed(2)}</td>
-                    <td>{t.category_name || "—"}</td>
-                    <td>{t.direction === "inflow" ? "Credit" : "Debit"}</td>
-                    <td>{t.notes || "—"}</td>
-                    <td className="row-actions">
-                      <button onClick={() => { setEditingId(t.id); setShowCreate(false); }}>Edit</button>
-                      <button className="delete-btn" onClick={() => handleDelete(t.id)} aria-label="Delete">✕</button>
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
+          <div className="txn-list card">
+            {transactions.map((t) => (
+              <div className="txn-row" key={t.id}>
+                <div className="txn-row-main" onClick={() => toggleRow(t.id)}>
+                  <div>
+                    <div className="txn-merchant">{t.merchant_raw || "Untitled"}</div>
+                    <div className="txn-row-sub">{fmtDate(t.transaction_at)} · {t.category_name || "Uncategorized"}</div>
+                  </div>
+                  <span className={`txn-amount ${t.direction === "inflow" ? "text-green" : "text-red"}`}>
+                    {fmtAmt(t)}
+                  </span>
+                </div>
+
+                {expandedId === t.id && editingId !== t.id && (
+                  <div className="txn-expanded">
+                    <dl className="txn-meta">
+                      {t.notes && <><dt className="txn-meta-key">Notes</dt><dd className="txn-meta-val">{t.notes}</dd></>}
+                      <dt className="txn-meta-key">Direction</dt>
+                      <dd className="txn-meta-val">{t.direction === "inflow" ? "Credit" : "Debit"}</dd>
+                    </dl>
+                    <div className="txn-expanded-actions">
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => { setEditingId(t.id); setExpandedId(null); setShowCreate(false); }}
+                      >
+                        Edit
+                      </button>
+                      <button className="btn btn-sm" style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent" }} onClick={() => handleDelete(t.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {editingId === t.id && (
+                  <div className="txn-expanded">
+                    <TxnForm
+                      initial={txnToForm(t)}
+                      categories={categories}
+                      onSave={async (payload) => {
+                        const updated = await api.updateTransaction(t.id, payload);
+                        handleSaved(updated);
+                      }}
+                      onCancel={() => { setEditingId(null); setExpandedId(t.id); }}
+                      submitLabel="Save"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
 
           <div className="pagination">
-            <button onClick={() => fetchPage(page - 1)} disabled={page === 0}>← Prev</button>
-            <span>Page {page + 1} of {totalPages} ({total} total)</span>
-            <button onClick={() => fetchPage(page + 1)} disabled={page >= totalPages - 1}>Next →</button>
+            <button onClick={() => fetchPage(page - 1)} disabled={page === 0 || loading}>← Prev</button>
+            <span>{page + 1} / {totalPages}</span>
+            <button onClick={() => fetchPage(page + 1)} disabled={page >= totalPages - 1 || loading}>Next →</button>
           </div>
         </>
       )}

@@ -3,6 +3,42 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 
+function EyeIcon({ open }) {
+  return open ? (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ) : (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function PwField({ label, value, onChange, autoComplete, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="field">
+      <label className="field-label">{label}</label>
+      <div className="input-wrap">
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+        />
+        <button type="button" className="toggle-pw" onClick={() => setShow((v) => !v)} tabIndex={-1}>
+          <EyeIcon open={show} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Profile() {
   const { logout } = useAuth();
   const navigate = useNavigate();
@@ -11,24 +47,22 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Budget form state
+  // Budget state
   const [income, setIncome] = useState("");
   const [savingsTarget, setSavingsTarget] = useState("");
   const [budgets, setBudgets] = useState([]);
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState(null);
 
-  // Gmail form state
+  // Gmail state
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [savingGmail, setSavingGmail] = useState(false);
   const [gmailMsg, setGmailMsg] = useState(null);
-
-  // Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
 
-  // Password change state
+  // Password state
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -90,9 +124,7 @@ export default function Profile() {
     setSyncMsg(null);
     try {
       const result = await api.sync();
-      setSyncMsg(
-        `Synced: ${result.imported ?? 0} imported, ${result.duplicates_skipped ?? 0} duplicates skipped.`
-      );
+      setSyncMsg(`Synced: ${result.imported ?? 0} imported, ${result.duplicates_skipped ?? 0} skipped.`);
     } catch (err) {
       setSyncMsg(`Error: ${err.message}`);
     } finally {
@@ -127,158 +159,187 @@ export default function Profile() {
     navigate("/login");
   }
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p className="error">{error}</p>;
+  if (loading) return <div className="top-bar-loading" />;
+  if (error) return (
+    <div className="page">
+      <div className="page-header"><h1>Profile</h1></div>
+      <div className="msg msg-error">{error}</div>
+    </div>
+  );
 
   return (
-    <div className="profile-page">
-      <h1>Profile</h1>
+    <div className="page">
+      <div className="page-header"><h1>Profile</h1></div>
 
-      <section className="profile-section">
-        <h2>Budget Settings</h2>
-        <form onSubmit={handleSaveBudget}>
-          <label>
-            Monthly Income ($)
-            <input
-              type="number"
-              value={income}
-              onChange={(e) => setIncome(e.target.value)}
-              step="0.01"
-              min="0"
-            />
-          </label>
-          <label>
-            Savings Target ($)
-            <input
-              type="number"
-              value={savingsTarget}
-              onChange={(e) => setSavingsTarget(e.target.value)}
-              step="0.01"
-              min="0"
-            />
-          </label>
+      {/* BUDGET */}
+      <div className="profile-block">
+        <p className="section-label">Budget</p>
+        <div className="card">
+          <form onSubmit={handleSaveBudget}>
+            <div className="form-stack">
+              <div className="field">
+                <label className="field-label">Monthly Income</label>
+                <input
+                  type="number"
+                  value={income}
+                  onChange={(e) => setIncome(e.target.value)}
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="field">
+                <label className="field-label">Savings Target</label>
+                <input
+                  type="number"
+                  value={savingsTarget}
+                  onChange={(e) => setSavingsTarget(e.target.value)}
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                />
+              </div>
 
-          {budgets.length > 0 && (
-            <table className="budget-table">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Budget ($)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {budgets.map((b, i) => (
-                  <tr key={b.category_id}>
-                    <td>{b.category_name}</td>
-                    <td>
-                      <input
-                        type="number"
-                        value={b.amount}
-                        onChange={(e) =>
-                          setBudgets((prev) =>
-                            prev.map((item, idx) =>
-                              idx === i ? { ...item, amount: e.target.value } : item
+              {budgets.length > 0 && (
+                <div>
+                  <p className="field-label" style={{ marginBottom: 8 }}>Category Budgets</p>
+                  <div className="budget-list">
+                    {budgets.map((b, i) => (
+                      <div className="budget-row" key={b.category_id}>
+                        <span className="budget-cat">{b.category_name}</span>
+                        <input
+                          type="number"
+                          value={b.amount}
+                          onChange={(e) =>
+                            setBudgets((prev) =>
+                              prev.map((item, idx) =>
+                                idx === i ? { ...item, amount: e.target.value } : item
+                              )
                             )
-                          )
-                        }
-                        step="0.01"
-                        min="0"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                          }
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {budgetMsg && <p className={budgetMsg.startsWith("Error") ? "error" : "success"}>{budgetMsg}</p>}
-          <button type="submit" disabled={savingBudget}>
-            {savingBudget ? "Saving..." : "Save"}
-          </button>
-        </form>
-      </section>
-
-      <section className="profile-section">
-        <h2>Gmail Sync</h2>
-        {profile.last_synced_at && (
-          <p className="last-synced">Last synced: {new Date(profile.last_synced_at).toLocaleString()}</p>
-        )}
-        <form onSubmit={handleSaveGmail}>
-          <label>
-            Gmail Address
-            <input
-              type="email"
-              value={gmailAddress}
-              onChange={(e) => setGmailAddress(e.target.value)}
-              placeholder="you@gmail.com"
-            />
-          </label>
-          <label>
-            App Password
-            <input
-              type="password"
-              value={appPassword}
-              onChange={(e) => setAppPassword(e.target.value)}
-              placeholder={profile.gmail_configured ? "••••••••••••••••" : ""}
-            />
-          </label>
-          {gmailMsg && <p className={gmailMsg.startsWith("Error") ? "error" : "success"}>{gmailMsg}</p>}
-          <button type="submit" disabled={savingGmail}>
-            {savingGmail ? "Saving..." : "Save Gmail"}
-          </button>
-        </form>
-
-        <div className="sync-row">
-          <button onClick={handleSync} disabled={syncing || !profile.gmail_configured}>
-            {syncing ? "Syncing..." : "Sync Now"}
-          </button>
-          {syncMsg && <p className={syncMsg.startsWith("Error") ? "error" : "success"}>{syncMsg}</p>}
+              {budgetMsg && (
+                <div className={`msg ${budgetMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                  {budgetMsg}
+                </div>
+              )}
+              <button className="btn btn-primary" type="submit" disabled={savingBudget}>
+                {savingBudget ? "Saving…" : "Save Budget"}
+              </button>
+            </div>
+          </form>
         </div>
-      </section>
+      </div>
 
-      <section className="profile-section">
-        <h2>Change Password</h2>
-        <form onSubmit={handleChangePassword}>
-          <label>
-            Current Password
-            <input
-              type="password"
-              value={currentPw}
-              onChange={(e) => setCurrentPw(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            New Password
-            <input
-              type="password"
-              value={newPw}
-              onChange={(e) => setNewPw(e.target.value)}
-              minLength={8}
-              required
-            />
-          </label>
-          <label>
-            Confirm New Password
-            <input
-              type="password"
-              value={confirmPw}
-              onChange={(e) => setConfirmPw(e.target.value)}
-              required
-            />
-          </label>
-          {pwMsg && <p className={pwMsg.startsWith("Error") ? "error" : "success"}>{pwMsg}</p>}
-          <button type="submit" disabled={changingPw}>
-            {changingPw ? "Changing..." : "Change Password"}
+      {/* GMAIL SYNC */}
+      <div className="profile-block">
+        <p className="section-label">Gmail Sync</p>
+        <div className="card">
+          {profile.last_synced_at && (
+            <p className="last-synced">
+              Last synced: {new Date(profile.last_synced_at).toLocaleString()}
+            </p>
+          )}
+          <form onSubmit={handleSaveGmail}>
+            <div className="form-stack">
+              <div className="field">
+                <label className="field-label">Gmail Address</label>
+                <input
+                  type="email"
+                  value={gmailAddress}
+                  onChange={(e) => setGmailAddress(e.target.value)}
+                  placeholder="you@gmail.com"
+                  autoComplete="email"
+                />
+              </div>
+              <PwField
+                label="App Password"
+                value={appPassword}
+                onChange={(e) => setAppPassword(e.target.value)}
+                autoComplete="off"
+                placeholder={profile.gmail_configured ? "••••••••••••••••" : ""}
+              />
+              {gmailMsg && (
+                <div className={`msg ${gmailMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                  {gmailMsg}
+                </div>
+              )}
+              <button className="btn btn-primary" type="submit" disabled={savingGmail}>
+                {savingGmail ? "Saving…" : "Save Gmail"}
+              </button>
+            </div>
+          </form>
+
+          <div className="divider" />
+
+          <button
+            className="btn btn-secondary"
+            style={{ width: "100%" }}
+            onClick={handleSync}
+            disabled={syncing || !profile.gmail_configured}
+            type="button"
+          >
+            {syncing ? "Syncing…" : "Sync Now"}
           </button>
-        </form>
-      </section>
+          {syncMsg && (
+            <div className={`msg ${syncMsg.startsWith("Error") ? "msg-error" : "msg-success"}`} style={{ marginTop: 10 }}>
+              {syncMsg}
+            </div>
+          )}
+        </div>
+      </div>
 
-      <section className="profile-section">
-        <button className="signout-btn" onClick={handleSignOut}>
-          Sign Out
-        </button>
-      </section>
+      {/* ACCOUNT */}
+      <div className="profile-block">
+        <p className="section-label">Account</p>
+        <div className="card">
+          <form onSubmit={handleChangePassword}>
+            <div className="form-stack">
+              <PwField
+                label="Current Password"
+                value={currentPw}
+                onChange={(e) => setCurrentPw(e.target.value)}
+                autoComplete="current-password"
+              />
+              <PwField
+                label="New Password"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                autoComplete="new-password"
+              />
+              <PwField
+                label="Confirm New Password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                autoComplete="new-password"
+              />
+              {pwMsg && (
+                <div className={`msg ${pwMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                  {pwMsg}
+                </div>
+              )}
+              <button className="btn btn-primary" type="submit" disabled={changingPw}>
+                {changingPw ? "Changing…" : "Change Password"}
+              </button>
+            </div>
+          </form>
+
+          <div className="divider" />
+
+          <button className="btn btn-destructive" type="button" onClick={handleSignOut}>
+            Sign Out
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -36,23 +36,33 @@ def list_transactions():
         category_id = request.args.get("category_id", type=int)
         limit = min(request.args.get("limit", default=25, type=int), 200)
         offset = max(request.args.get("offset", default=0, type=int), 0)
+        date_from = request.args.get("date_from")
+        date_to = request.args.get("date_to")
     except (TypeError, ValueError):
         return _err("Invalid query parameters", 400)
 
+    where_clauses = []
+    params: list = []
+
     if category_id is not None:
-        total = db.execute(
-            "SELECT COUNT(*) FROM transactions WHERE category_id = ?", (category_id,)
-        ).fetchone()[0]
-        rows = db.execute(
-            _TXN_SELECT + "WHERE t.category_id = ? ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
-            (category_id, limit, offset),
-        ).fetchall()
-    else:
-        total = db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
-        rows = db.execute(
-            _TXN_SELECT + "ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+        where_clauses.append("t.category_id = ?")
+        params.append(category_id)
+    if date_from:
+        where_clauses.append("t.transaction_at >= ?")
+        params.append(date_from)
+    if date_to:
+        where_clauses.append("t.transaction_at <= ?")
+        params.append(date_to + "T23:59:59")
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    total = db.execute(
+        f"SELECT COUNT(*) FROM transactions t {where_sql}", params
+    ).fetchone()[0]
+    rows = db.execute(
+        _TXN_SELECT + f"{where_sql} ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
 
     return _ok({
         "transactions": [_row_to_dict(r) for r in rows],
