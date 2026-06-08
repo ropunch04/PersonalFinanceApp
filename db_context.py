@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     category_id    INTEGER REFERENCES categories(id),
     notes          TEXT,
     transaction_at TEXT    NOT NULL,
-    created_at     TEXT    NOT NULL
+    created_at     TEXT    NOT NULL,
+    source_hash    TEXT    UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS profile (
