@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from flask import Blueprint, g, request
 
@@ -11,7 +11,7 @@ bp = Blueprint("import", __name__, url_prefix="/api")
 
 _PARSERS = {
     "capitalone": parse_capitalone_csv,
-    "venmo":      parse_venmo_csv,
+    "venmo": parse_venmo_csv,
 }
 
 
@@ -36,7 +36,7 @@ def import_transactions():
 
     parse = _PARSERS[source_type]
     conn = get_user_db(g.current_user["user_id"])
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     all_rows, all_errors = [], []
     for upload in files:
@@ -74,8 +74,10 @@ def import_transactions():
 
     conn.commit()
 
-    return _ok({
-        "imported":          imported,
-        "duplicates_skipped": duplicates_skipped,
-        "errors":            all_errors,
-    })
+    return _ok(
+        {
+            "imported": imported,
+            "duplicates_skipped": duplicates_skipped,
+            "errors": all_errors,
+        }
+    )

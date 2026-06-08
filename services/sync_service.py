@@ -1,6 +1,6 @@
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from db_context import get_db_path
 from models.user import MASTER_DB
@@ -35,7 +35,7 @@ def sync_user(user_id: int) -> dict:
 
         transactions, parse_errors = fetch_emails(profile["gmail_address"], app_password, conn)
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         synced = 0
         for row in transactions:
             cur = conn.execute(
@@ -59,9 +59,7 @@ def sync_user(user_id: int) -> dict:
             if cur.rowcount == 1:
                 synced += 1
 
-        conn.execute(
-            "UPDATE profile SET last_synced_at = ? WHERE id = 1", (now,)
-        )
+        conn.execute("UPDATE profile SET last_synced_at = ? WHERE id = 1", (now,))
         conn.commit()
 
         return {"synced": synced, "errors": parse_errors}
@@ -85,9 +83,7 @@ def scheduled_sync_all() -> None:
         user_id = user["id"]
         conn = _open_user_db(user_id)
         try:
-            profile = conn.execute(
-                "SELECT gmail_address FROM profile WHERE id = 1"
-            ).fetchone()
+            profile = conn.execute("SELECT gmail_address FROM profile WHERE id = 1").fetchone()
             has_gmail = profile and profile["gmail_address"]
         finally:
             conn.close()
@@ -97,9 +93,14 @@ def scheduled_sync_all() -> None:
 
         result = sync_user(user_id)
         if "error" in result:
-            logger.error("sync failed for user %s (%s): %s", user_id, user["username"], result["error"])
+            logger.error(
+                "sync failed for user %s (%s): %s", user_id, user["username"], result["error"]
+            )
         else:
             logger.info(
                 "synced user %s (%s): %d new, %d parse errors",
-                user_id, user["username"], result["synced"], len(result.get("errors", []))
+                user_id,
+                user["username"],
+                result["synced"],
+                len(result.get("errors", [])),
             )

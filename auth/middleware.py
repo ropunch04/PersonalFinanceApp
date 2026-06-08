@@ -1,6 +1,9 @@
 from functools import wraps
+
 from flask import g, request
+
 from auth.jwt_utils import decode_token
+
 
 def require_auth(f):
     @wraps(f)
@@ -22,6 +25,7 @@ def require_auth(f):
         }
 
         return f(*args, **kwargs)
+
     return decorated
 
 
@@ -31,4 +35,5 @@ def require_admin(f):
         if not g.current_user.get("is_admin"):
             return {"error": "Forbidden"}, 403
         return f(*args, **kwargs)
+
     return decorated

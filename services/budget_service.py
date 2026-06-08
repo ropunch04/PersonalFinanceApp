@@ -36,19 +36,19 @@ def get_budget_summary(conn: sqlite3.Connection) -> dict:
     """).fetchall()
 
     return {
-        "monthly_income":  monthly_income,
-        "savings_target":  savings_target,
-        "total_spent":     total_spent,
-        "total_income":    total_income,
-        "net":             total_income - total_spent,
-        "savings_amount":  monthly_income * (savings_target / 100),
+        "monthly_income": monthly_income,
+        "savings_target": savings_target,
+        "total_spent": total_spent,
+        "total_income": total_income,
+        "net": total_income - total_spent,
+        "savings_amount": monthly_income * (savings_target / 100),
         "by_category": [
             {
-                "category_id":   r["category_id"],
+                "category_id": r["category_id"],
                 "category_name": r["category_name"],
-                "spent":         r["spent"],
-                "budget":        r["budget"],
-                "remaining":     r["budget"] - r["spent"],
+                "spent": r["spent"],
+                "budget": r["budget"],
+                "remaining": r["budget"] - r["spent"],
             }
             for r in by_category
         ],

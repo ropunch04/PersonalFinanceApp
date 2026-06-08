@@ -1,3 +1,3 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-APP_START_TIME = datetime.now(timezone.utc)
+APP_START_TIME = datetime.now(UTC)

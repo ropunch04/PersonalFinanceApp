@@ -1,12 +1,19 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from flask import g
 
 _DEFAULT_CATEGORIES = [
-    "Food", "Transport", "Shopping", "Entertainment",
-    "Health", "Housing", "Utilities", "Income", "Other",
+    "Food",
+    "Transport",
+    "Shopping",
+    "Entertainment",
+    "Health",
+    "Housing",
+    "Utilities",
+    "Income",
+    "Other",
 ]
 
 _SCHEMA = """
@@ -66,7 +73,7 @@ def init_user_db(user_id: int) -> None:
     conn = sqlite3.connect(get_db_path(user_id))
     try:
         conn.executescript(_SCHEMA)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.executemany(
             "INSERT OR IGNORE INTO categories (name) VALUES (?)",
             [(name,) for name in _DEFAULT_CATEGORIES],

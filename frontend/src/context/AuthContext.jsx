@@ -17,7 +17,7 @@ export function AuthProvider({ children }) {
           setToken(null);
         });
     }
-  }, [token]);
+  }, [token, user]);
 
   const login = (newToken, userData) => {
     localStorage.setItem(TOKEN_KEY, newToken);
@@ -38,6 +38,7 @@ export function AuthProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");

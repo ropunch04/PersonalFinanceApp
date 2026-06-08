@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from flask import Blueprint, g, request
 
@@ -73,7 +73,7 @@ def create_transaction():
     if direction not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
 
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(UTC).isoformat()
 
     cur = db.execute(
         """
@@ -93,9 +93,7 @@ def create_transaction():
     )
     db.commit()
 
-    row = db.execute(
-        _TXN_SELECT + "WHERE t.id = ?", (cur.lastrowid,)
-    ).fetchone()
+    row = db.execute(_TXN_SELECT + "WHERE t.id = ?", (cur.lastrowid,)).fetchone()
     return _ok(_row_to_dict(row)), 201
 
 

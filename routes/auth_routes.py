@@ -2,6 +2,7 @@ import os
 
 import bcrypt
 from flask import Blueprint, g, request
+
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
@@ -10,6 +11,7 @@ from models.user import create_user, get_user_by_email, get_user_by_username
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 _GENERIC_LOGIN_ERROR = {"error": "Invalid credentials"}
+
 
 @bp.post("/register")
 def register():
@@ -39,7 +41,12 @@ def register():
 
     init_user_db(user_id)
     token = encode_token(user_id, username, is_admin=False)
-    return {"data": {"token": token, "user": {"id": user_id, "username": username, "email": email, "is_admin": False}}}, 201
+    return {
+        "data": {
+            "token": token,
+            "user": {"id": user_id, "username": username, "email": email, "is_admin": False},
+        }
+    }, 201
 
 
 @bp.post("/login")

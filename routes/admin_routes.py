@@ -1,6 +1,6 @@
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bcrypt
 from flask import Blueprint, g, request
@@ -50,6 +50,7 @@ def _user_with_finance(user: dict) -> dict:
 
 
 # ── Users ────────────────────────────────────────────────────────────────────
+
 
 @admin_bp.get("/users")
 @require_auth
@@ -152,20 +153,24 @@ def sync_user(user_id):
 
 # ── System ───────────────────────────────────────────────────────────────────
 
+
 @admin_bp.get("/system")
 @require_auth
 @require_admin
 def system_info():
-    uptime = (datetime.now(timezone.utc) - APP_START_TIME).total_seconds()
-    return _ok({
-        "uptime_seconds": uptime,
-        "user_count": count_users(),
-        "python_version": sys.version,
-        "platform": sys.platform,
-    })
+    uptime = (datetime.now(UTC) - APP_START_TIME).total_seconds()
+    return _ok(
+        {
+            "uptime_seconds": uptime,
+            "user_count": count_users(),
+            "python_version": sys.version,
+            "platform": sys.platform,
+        }
+    )
 
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
+
 
 @admin_bp.get("/logs")
 @require_auth
@@ -174,7 +179,7 @@ def get_logs():
     n = request.args.get("lines", default=100, type=int)
 
     try:
-        with open(config.LOG_FILE, "r") as f:
+        with open(config.LOG_FILE) as f:
             all_lines = f.readlines()
     except FileNotFoundError:
         return _ok({"lines": [], "total_lines": 0})

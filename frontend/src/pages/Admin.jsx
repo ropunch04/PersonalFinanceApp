@@ -178,7 +178,9 @@ export default function Admin() {
   let currentUserId = null;
   try {
     currentUserId = JSON.parse(atob(token.split(".")[1])).sub;
-  } catch {}
+  } catch {
+    // token missing or malformed — currentUserId stays null
+  }
 
   useEffect(() => {
     Promise.all([api.admin.listUsers(), api.admin.getSystem()])

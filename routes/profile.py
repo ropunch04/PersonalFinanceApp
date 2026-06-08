@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from flask import Blueprint, g, request
 
@@ -6,6 +6,7 @@ from auth.middleware import require_auth
 from db_context import get_user_db
 
 bp = Blueprint("profile", __name__, url_prefix="/api")
+
 
 def _ok(data):
     return {"data": data, "error": None}
@@ -54,7 +55,7 @@ def update_profile():
     updates = {k: v for k, v in body.items() if k in scalar_fields}
 
     if updates:
-        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        updates["updated_at"] = datetime.now(UTC).isoformat()
         set_clause = ", ".join(f"{col} = ?" for col in updates)
         conn.execute(
             f"UPDATE profile SET {set_clause} WHERE id = 1",

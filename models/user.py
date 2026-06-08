@@ -1,6 +1,7 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 import config
 
 MASTER_DB = Path(config.DB_PATH).parent / "master.db"
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(MASTER_DB)
     conn.row_factory = sqlite3.Row
@@ -25,10 +27,12 @@ def _connect() -> sqlite3.Connection:
 
     return conn
 
+
 def init_master_db() -> None:
     MASTER_DB.parent.mkdir(parents=True, exist_ok=True)
     with _connect() as conn:
         conn.executescript(SCHEMA)
+
 
 def create_user(
     username: str,
@@ -36,7 +40,7 @@ def create_user(
     password_hash: str,
     is_admin: bool = False,
 ) -> int:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     with _connect() as conn:
         cur = conn.execute(
             """
@@ -47,24 +51,21 @@ def create_user(
         )
         return cur.lastrowid
 
+
 def get_user_by_username(username: str) -> sqlite3.Row | None:
     with _connect() as conn:
-        return conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
-        ).fetchone()
+        return conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+
 
 def get_user_by_email(email: str) -> sqlite3.Row | None:
     with _connect() as conn:
-        return conn.execute(
-            "SELECT * FROM users WHERE email = ?", (email,)
-        ).fetchone()
+        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
 
 
 def get_user_by_id(user_id: int) -> sqlite3.Row | None:
     with _connect() as conn:
-        return conn.execute(
-            "SELECT * FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
+        return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
 
 def count_users() -> int:
     with _connect() as conn:
