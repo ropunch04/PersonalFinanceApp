@@ -53,6 +53,13 @@ def get_user_by_username(username: str) -> sqlite3.Row | None:
             "SELECT * FROM users WHERE username = ?", (username,)
         ).fetchone()
 
+def get_user_by_email(email: str) -> sqlite3.Row | None:
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT * FROM users WHERE email = ?", (email,)
+        ).fetchone()
+
+
 def get_user_by_id(user_id: int) -> sqlite3.Row | None:
     with _connect() as conn:
         return conn.execute(
@@ -62,3 +69,42 @@ def get_user_by_id(user_id: int) -> sqlite3.Row | None:
 def count_users() -> int:
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
+def list_all_users() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, username, email, is_admin, created_at, last_login_at FROM users ORDER BY created_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_user(user_id: int, fields: dict) -> dict:
+    allowed = {"username", "email", "is_admin"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        raise ValueError("No updatable fields provided")
+    set_clause = ", ".join(f"{col} = ?" for col in updates)
+    with _connect() as conn:
+        conn.execute(
+            f"UPDATE users SET {set_clause} WHERE id = ?",
+            [*updates.values(), user_id],
+        )
+        row = conn.execute(
+            "SELECT id, username, email, is_admin, created_at, last_login_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row)
+
+
+def update_password(user_id: int, new_hash: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (new_hash, user_id),
+        )
+
+
+def delete_user(user_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

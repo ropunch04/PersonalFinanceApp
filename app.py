@@ -7,6 +7,7 @@ from flask import Flask, g, send_from_directory
 
 import config
 from models.user import init_master_db
+from routes.admin_routes import admin_bp
 from routes.auth_routes import bp as auth_bp
 from routes.categories import bp as categories_bp
 from routes.dashboard import bp as dashboard_bp
@@ -21,6 +22,7 @@ load_dotenv()
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__)
+app.register_blueprint(admin_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(categories_bp)
 app.register_blueprint(dashboard_bp)

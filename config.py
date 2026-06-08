@@ -16,3 +16,5 @@ DB_PATH = os.environ.get("DB_PATH", "data/finance.db")
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
 if not ENCRYPTION_KEY:
     raise ValueError("ENCRYPTION_KEY must be set in the environment.")
+
+LOG_FILE = os.environ.get("LOG_FILE", "logs/app.log")

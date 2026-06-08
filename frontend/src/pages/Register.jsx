@@ -3,10 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 
-export default function Login() {
+export default function Register() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -16,7 +17,7 @@ export default function Login() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.login(username, password);
+      const data = await api.register(username, email, password);
       login(data.token, data.user);
       navigate("/");
     } catch (err) {
@@ -28,7 +29,7 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <h1>Sign In</h1>
+      <h1>Create Account</h1>
       <form onSubmit={handleSubmit}>
         <label>
           Username
@@ -38,6 +39,15 @@ export default function Login() {
             onChange={(e) => setUsername(e.target.value)}
             required
             autoFocus
+          />
+        </label>
+        <label>
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
           />
         </label>
         <label>
@@ -51,11 +61,11 @@ export default function Login() {
         </label>
         {error && <p className="error">{error}</p>}
         <button type="submit" disabled={loading}>
-          {loading ? "Logging in..." : "Log In"}
+          {loading ? "Creating account..." : "Register"}
         </button>
       </form>
       <p className="auth-link">
-        Don't have an account? <Link to="/register">Register</Link>
+        Already have an account? <Link to="/login">Sign in</Link>
       </p>
     </div>
   );

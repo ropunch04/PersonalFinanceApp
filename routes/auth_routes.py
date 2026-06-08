@@ -1,9 +1,11 @@
+import os
+
 import bcrypt
 from flask import Blueprint, g, request
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
-from models.user import create_user, get_user_by_username
+from models.user import create_user, get_user_by_email, get_user_by_username
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -11,6 +13,9 @@ _GENERIC_LOGIN_ERROR = {"error": "Invalid credentials"}
 
 @bp.post("/register")
 def register():
+    if os.environ.get("REGISTRATION_ENABLED", "true").lower() == "false":
+        return {"error": "Registration is closed"}, 403
+
     body = request.get_json(silent=True) or {}
     username = body.get("username", "").strip()
     email = body.get("email", "").strip()
@@ -22,6 +27,9 @@ def register():
     if get_user_by_username(username):
         return {"error": "Username already taken"}, 409
 
+    if get_user_by_email(email):
+        return {"error": "Email already registered"}, 409
+
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
     try:
@@ -31,7 +39,7 @@ def register():
 
     init_user_db(user_id)
     token = encode_token(user_id, username, is_admin=False)
-    return {"token": token, "user": {"id": user_id, "username": username, "email": email, "is_admin": False}}, 201
+    return {"data": {"token": token, "user": {"id": user_id, "username": username, "email": email, "is_admin": False}}}, 201
 
 
 @bp.post("/login")
@@ -50,13 +58,15 @@ def login():
     init_user_db(row["id"])
     token = encode_token(row["id"], row["username"], bool(row["is_admin"]))
     return {
-        "token": token,
-        "user": {
-            "id": row["id"],
-            "username": row["username"],
-            "email": row["email"],
-            "is_admin": bool(row["is_admin"]),
-        },
+        "data": {
+            "token": token,
+            "user": {
+                "id": row["id"],
+                "username": row["username"],
+                "email": row["email"],
+                "is_admin": bool(row["is_admin"]),
+            },
+        }
     }
 
 

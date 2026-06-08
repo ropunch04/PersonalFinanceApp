@@ -61,4 +61,16 @@ export const api = {
   updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
 
   sync: () => request("POST", "/api/sync"),
+
+  admin: {
+    listUsers: () => request("GET", "/api/admin/users"),
+    createUser: (data) => request("POST", "/api/admin/users", data),
+    updateUser: (id, data) => request("PUT", `/api/admin/users/${id}`, data),
+    resetPassword: (id, new_password) =>
+      request("POST", `/api/admin/users/${id}/reset-password`, { new_password }),
+    deleteUser: (id) => request("DELETE", `/api/admin/users/${id}`),
+    syncUser: (id) => request("POST", `/api/admin/users/${id}/sync`),
+    getSystem: () => request("GET", "/api/admin/system"),
+    getLogs: (lines = 100) => request("GET", `/api/admin/logs?lines=${lines}`),
+  },
 };
