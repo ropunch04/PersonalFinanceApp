@@ -1,6 +1,6 @@
 import sqlite3
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import bcrypt
 from flask import Blueprint, g, request
@@ -158,7 +158,7 @@ def sync_user(user_id):
 @require_auth
 @require_admin
 def system_info():
-    uptime = (datetime.now(UTC) - APP_START_TIME).total_seconds()
+    uptime = (datetime.now(timezone.utc) - APP_START_TIME).total_seconds()
     return _ok(
         {
             "uptime_seconds": uptime,

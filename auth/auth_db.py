@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import bcrypt
 
@@ -46,7 +46,7 @@ def authenticate_user(username: str, password: str) -> dict:
 
 
 def _update_last_login(user_id: int) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         conn.execute(
             "UPDATE users SET last_login_at = ? WHERE id = ?",

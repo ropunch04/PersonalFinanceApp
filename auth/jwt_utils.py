@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import jwt
 
@@ -13,7 +13,7 @@ def encode_token(user_id: int, username: str, is_admin: bool) -> str:
         "sub": str(user_id),
         "username": username,
         "is_admin": is_admin,
-        "exp": datetime.now(UTC) + timedelta(hours=_TTL_HOURS),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=_TTL_HOURS),
     }
     return jwt.encode(payload, config.SECRET_KEY, algorithm=_ALGORITHM)
 

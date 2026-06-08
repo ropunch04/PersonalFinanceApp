@@ -12,6 +12,11 @@ async function request(method, path, body = null) {
   });
 
   const json = await res.json();
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    window.location.href = "/login";
+    return;
+  }
   if (!res.ok) throw new Error(json.error || "Request failed");
   return json.data;
 }
@@ -52,6 +57,11 @@ export const api = {
     return fetch("/api/import/transactions", { method: "POST", headers, body: form }).then(
       async (res) => {
         const json = await res.json();
+        if (res.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          window.location.href = "/login";
+          return;
+        }
         if (!res.ok) throw new Error(json.error || "Request failed");
         return json.data;
       }

@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import g
@@ -73,7 +73,7 @@ def init_user_db(user_id: int) -> None:
     conn = sqlite3.connect(get_db_path(user_id))
     try:
         conn.executescript(_SCHEMA)
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
             "INSERT OR IGNORE INTO categories (name) VALUES (?)",
             [(name,) for name in _DEFAULT_CATEGORIES],

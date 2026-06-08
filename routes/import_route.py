@@ -1,5 +1,5 @@
 import io
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, g, request
 
@@ -36,7 +36,7 @@ def import_transactions():
 
     parse = _PARSERS[source_type]
     conn = get_user_db(g.current_user["user_id"])
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     all_rows, all_errors = [], []
     for upload in files:

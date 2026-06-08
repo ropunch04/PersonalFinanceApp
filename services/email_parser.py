@@ -1,7 +1,7 @@
 import hashlib
 import imaplib
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from email import message_from_bytes
 from email.message import Message
 
@@ -71,7 +71,7 @@ def _parse_cap1_date(text: str) -> str:
                 return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%dT00:00:00")
             except ValueError:
                 continue
-    return datetime.now(UTC).strftime("%Y-%m-%dT00:00:00")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
 
 
 def _parse_charge_email(msg: Message, message_id: str, conn) -> dict | None:
@@ -120,9 +120,9 @@ def _parse_credit_email(msg: Message, message_id: str, conn) -> dict | None:
         try:
             transaction_at = datetime.strptime(raw, "%b %d %Y").strftime("%Y-%m-%dT00:00:00")
         except ValueError:
-            transaction_at = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00")
+            transaction_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
     else:
-        transaction_at = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00")
+        transaction_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
 
     return {
         "amount": amount,

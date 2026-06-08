@@ -1,5 +1,7 @@
 import atexit
+import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -32,6 +34,13 @@ app.register_blueprint(sync_bp)
 app.register_blueprint(transactions_bp)
 
 init_master_db()
+
+os.makedirs("logs", exist_ok=True)
+_file_handler = RotatingFileHandler(config.LOG_FILE, maxBytes=1_000_000, backupCount=5)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+logging.getLogger().addHandler(_file_handler)
+logging.getLogger().setLevel(logging.INFO)
+app.logger.info("Flask app started")
 
 
 @app.teardown_appcontext

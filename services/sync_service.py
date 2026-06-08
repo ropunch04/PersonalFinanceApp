@@ -1,6 +1,6 @@
 import logging
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from db_context import get_db_path
 from models.user import MASTER_DB
@@ -35,7 +35,7 @@ def sync_user(user_id: int) -> dict:
 
         transactions, parse_errors = fetch_emails(profile["gmail_address"], app_password, conn)
 
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         synced = 0
         for row in transactions:
             cur = conn.execute(

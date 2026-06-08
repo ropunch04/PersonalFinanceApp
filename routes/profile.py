@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, g, request
 
@@ -55,7 +55,7 @@ def update_profile():
     updates = {k: v for k, v in body.items() if k in scalar_fields}
 
     if updates:
-        updates["updated_at"] = datetime.now(UTC).isoformat()
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         set_clause = ", ".join(f"{col} = ?" for col in updates)
         conn.execute(
             f"UPDATE profile SET {set_clause} WHERE id = 1",

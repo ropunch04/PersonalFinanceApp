@@ -6,7 +6,7 @@ from flask import Blueprint, g, request
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
-from models.user import create_user, get_user_by_email, get_user_by_username
+from models.user import create_user, get_user_by_email, get_user_by_id, get_user_by_username
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -80,4 +80,13 @@ def login():
 @bp.get("/me")
 @require_auth
 def me():
-    return g.current_user
+    row = get_user_by_id(g.current_user["user_id"])
+    if not row:
+        return {"error": "User not found"}, 404
+    return {
+        "user_id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "is_admin": bool(row["is_admin"]),
+        "last_login_at": row["last_login_at"],
+    }
