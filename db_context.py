@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import g
@@ -24,6 +25,21 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_at TEXT    NOT NULL,
     created_at     TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS profile (
+    id              INTEGER PRIMARY KEY CHECK(id = 1),
+    monthly_income  REAL    NOT NULL DEFAULT 0,
+    savings_target  REAL    NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS budgets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    amount      REAL    NOT NULL DEFAULT 0,
+    UNIQUE(category_id)
+);
 """
 
 
@@ -46,9 +62,18 @@ def init_user_db(user_id: int) -> None:
     conn = sqlite3.connect(get_db_path(user_id))
     try:
         conn.executescript(_SCHEMA)
+        now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
             "INSERT OR IGNORE INTO categories (name) VALUES (?)",
             [(name,) for name in _DEFAULT_CATEGORIES],
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO profile (id, monthly_income, savings_target, created_at, updated_at)"
+            " VALUES (1, 0, 0, ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO budgets (category_id, amount) SELECT id, 0 FROM categories"
         )
         conn.commit()
     finally:

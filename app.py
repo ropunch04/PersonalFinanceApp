@@ -3,6 +3,8 @@ from flask import Flask, g
 from models.user import init_master_db
 from routes.auth_routes import bp as auth_bp
 from routes.categories import bp as categories_bp
+from routes.dashboard import bp as dashboard_bp
+from routes.profile import bp as profile_bp
 from routes.transactions import bp as transactions_bp
 
 load_dotenv()
@@ -10,6 +12,8 @@ load_dotenv()
 app = Flask(__name__)
 app.register_blueprint(auth_bp)
 app.register_blueprint(categories_bp)
+app.register_blueprint(dashboard_bp)
+app.register_blueprint(profile_bp)
 app.register_blueprint(transactions_bp)
 
 init_master_db()
