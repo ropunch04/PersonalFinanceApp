@@ -39,7 +39,6 @@ export default function Import() {
     <div className="page">
       <div className="page-header"><h1>Import</h1></div>
 
-      {/* Source type segmented control */}
       <div className="segmented">
         {SOURCE_TYPES.map((s) => (
           <button
@@ -54,7 +53,6 @@ export default function Import() {
       </div>
 
       <form onSubmit={handleSubmit}>
-        {/* Drop zone */}
         <div
           className={`drop-zone${files.length > 0 ? " has-files" : ""}`}
           onDragOver={(e) => e.preventDefault()}

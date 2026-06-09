@@ -36,7 +36,8 @@ def sync_user(user_id: int) -> dict:
         transactions, parse_errors = fetch_emails(profile["gmail_address"], app_password, conn)
 
         now = datetime.now(timezone.utc).isoformat()
-        synced = 0
+        imported = 0
+        duplicates_skipped = 0
         for row in transactions:
             cur = conn.execute(
                 """
@@ -57,12 +58,14 @@ def sync_user(user_id: int) -> dict:
                 ),
             )
             if cur.rowcount == 1:
-                synced += 1
+                imported += 1
+            else:
+                duplicates_skipped += 1
 
         conn.execute("UPDATE profile SET last_synced_at = ? WHERE id = 1", (now,))
         conn.commit()
 
-        return {"synced": synced, "errors": parse_errors}
+        return {"imported": imported, "duplicates_skipped": duplicates_skipped, "errors": parse_errors}
 
     except Exception as exc:
         logger.exception("sync_user(%s) failed", user_id)

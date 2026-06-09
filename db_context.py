@@ -5,14 +5,14 @@ from pathlib import Path
 from flask import g
 
 _DEFAULT_CATEGORIES = [
-    "Food",
-    "Transport",
-    "Shopping",
+    "Dining",
+    "Groceries",
+    "Travel",
     "Entertainment",
-    "Health",
+    "Shopping",
     "Housing",
-    "Utilities",
-    "Income",
+    "Transportation",
+    "Health & Personal Care",
     "Other",
 ]
 

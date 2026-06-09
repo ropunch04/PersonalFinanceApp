@@ -1,13 +1,16 @@
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
-import { useAuth } from "./context/AuthContext";
+import { useEffect, useState } from "react";
+import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { OnlineProvider } from "./context/OnlineContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
-import Import from "./pages/Import";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
+import InstallPrompt from "./components/InstallPrompt";
+import { api } from "./api";
 
 function IconDashboard() {
   return (
@@ -30,16 +33,6 @@ function IconTransactions() {
   );
 }
 
-function IconImport() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" y1="3" x2="12" y2="15" />
-    </svg>
-  );
-}
-
 function IconProfile() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -58,34 +51,76 @@ function IconAdmin() {
   );
 }
 
-function BottomNav() {
+function NavItem({ to, icon, label, badge, end }) {
+  return (
+    <NavLink to={to} title={label} end={end}>
+      {badge > 0 && <span className="nav-badge">{badge}</span>}
+      {icon}
+      <span className="nav-label">{label}</span>
+    </NavLink>
+  );
+}
+
+function BottomNav({ pendingCount }) {
   const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) return null;
-
   return (
     <nav className="bottom-nav">
-      <NavLink to="/" title="Dashboard"><IconDashboard /></NavLink>
-      <NavLink to="/transactions" title="Transactions"><IconTransactions /></NavLink>
-      <NavLink to="/import" title="Import"><IconImport /></NavLink>
-      <NavLink to="/profile" title="Profile"><IconProfile /></NavLink>
-      {user?.is_admin && <NavLink to="/admin" title="Admin"><IconAdmin /></NavLink>}
+      <NavItem to="/" icon={<IconDashboard />} label="Home" end />
+      <NavItem to="/transactions" icon={<IconTransactions />} label="Transactions" badge={pendingCount} />
+      <NavItem to="/profile" icon={<IconProfile />} label="Profile" />
+      {user?.is_admin && <NavItem to="/admin" icon={<IconAdmin />} label="Admin" />}
     </nav>
+  );
+}
+
+function AppRoutes({ setPendingCount }) {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/" element={<ProtectedRoute><Dashboard onQueueChange={setPendingCount} /></ProtectedRoute>} />
+      <Route path="/queue" element={<Navigate to="/transactions?status=pending" replace />} />
+      <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
+      <Route path="/insights" element={<Navigate to="/" replace />} />
+      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/profile/setup" element={<ProtectedRoute><Profile setup /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function AppContent() {
+  const [pendingCount, setPendingCount] = useState(0);
+  const { isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    api.queue().then((d) => setPendingCount(d.count ?? 0)).catch(() => {});
+    const interval = setInterval(() => {
+      api.queue().then((d) => setPendingCount(d.count ?? 0)).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
+  return (
+    <>
+      <AppRoutes setPendingCount={setPendingCount} />
+      <BottomNav pendingCount={pendingCount} />
+      <InstallPrompt />
+    </>
   );
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
-        <Route path="/import" element={<ProtectedRoute><Import /></ProtectedRoute>} />
-        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-        <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
-      </Routes>
-      <BottomNav />
-    </BrowserRouter>
+    <OnlineProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </AuthProvider>
+    </OnlineProvider>
   );
 }

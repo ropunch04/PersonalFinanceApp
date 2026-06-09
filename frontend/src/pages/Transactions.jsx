@@ -1,16 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import CategoryPicker from "../components/CategoryPicker";
+import { useOnline } from "../context/OnlineContext";
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+const SOURCE_TYPES = [
+  { value: "capitalone", label: "Capital One" },
+  { value: "venmo", label: "Venmo" },
+];
 
 const PAGE_SIZE = 25;
-
-const EMPTY_FORM = {
-  merchant_raw: "",
-  amount: "",
-  direction: "outflow",
-  transaction_at: new Date().toISOString().slice(0, 10),
-  category_id: "",
-  notes: "",
-};
 
 function txnToForm(t) {
   return {
@@ -31,8 +32,244 @@ function fmtAmt(t) {
 
 function fmtDate(s) {
   if (!s) return "";
-  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+
+// ── Import CSV modal (unchanged) ──────────────────────────────────────────────
+
+function ImportModal({ onClose, onImported }) {
+  const [sourceType, setSourceType] = useState("capitalone");
+  const [files, setFiles] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const backdropRef = useRef(null);
+
+  function handleBackdropClick(e) {
+    if (e.target === backdropRef.current) onClose();
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (files.length === 0) return;
+    setSubmitting(true);
+    setResult(null);
+    setError(null);
+    try {
+      const data = await api.importTransactions(sourceType, files);
+      setResult(data);
+      onImported();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdropClick}>
+      <div className="modal">
+        <div className="modal-header">
+          <h2>Import CSV</h2>
+          <button className="modal-close" onClick={onClose} type="button">×</button>
+        </div>
+
+        <div className="segmented" style={{ marginBottom: 16 }}>
+          {SOURCE_TYPES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={sourceType === s.value ? "seg-active" : ""}
+              onClick={() => { setSourceType(s.value); setResult(null); }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div
+            className={`drop-zone${files.length > 0 ? " has-files" : ""}`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const dropped = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith(".csv"));
+              if (dropped.length) { setFiles(dropped); setResult(null); }
+            }}
+          >
+            <input
+              type="file"
+              accept=".csv"
+              multiple
+              onChange={(e) => { setFiles(Array.from(e.target.files)); setResult(null); }}
+            />
+            <svg className="drop-zone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            {files.length > 0 ? (
+              <div className="drop-zone-text">
+                <strong>{files.length} file{files.length !== 1 ? "s" : ""} selected</strong>
+                {files.map((f) => f.name).join(", ")}
+              </div>
+            ) : (
+              <div className="drop-zone-text">
+                <strong>Tap to choose CSV files</strong>
+                or drag and drop here
+              </div>
+            )}
+          </div>
+
+          {error && <div className="msg msg-error" style={{ marginBottom: 12 }}>{error}</div>}
+
+          {result && (
+            <div className="import-result" style={{ marginBottom: 12 }}>
+              <div className="import-stat green">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                {result.imported} transaction{result.imported !== 1 ? "s" : ""} imported
+              </div>
+              {(result.duplicates_skipped ?? 0) > 0 && (
+                <div className="import-stat grey">
+                  {result.duplicates_skipped} duplicate{result.duplicates_skipped !== 1 ? "s" : ""} skipped
+                </div>
+              )}
+              {result.errors?.length > 0 && result.errors.map((e, i) => (
+                <div key={i} className="import-error-item">{e}</div>
+              ))}
+            </div>
+          )}
+
+          <button className="btn btn-primary" type="submit" disabled={submitting || files.length === 0}>
+            {submitting ? "Importing…" : "Import"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Classify merchants modal (unchanged) ─────────────────────────────────────
+
+function ClassifyModal({ categories, onClose, onDone }) {
+  const backdropRef = useRef(null);
+  const [merchants, setMerchants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [savingPrefix, setSavingPrefix] = useState(null);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoResult, setAutoResult] = useState(null);
+
+  function loadMerchants() {
+    setLoading(true);
+    api.getUnclassifiedMerchants()
+      .then(setMerchants)
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadMerchants();
+  }, []);
+
+  async function handleAutoClassify() {
+    setAutoRunning(true);
+    setAutoResult(null);
+    try {
+      const result = await api.autoClassify();
+      setAutoResult(result);
+      loadMerchants();
+      onDone();
+    } catch {
+    } finally {
+      setAutoRunning(false);
+    }
+  }
+
+  async function assign(merchant, categoryId) {
+    setSavingPrefix(merchant.prefix);
+    try {
+      await api.bulkCategorize(merchant.example, categoryId);
+      setMerchants((prev) => prev.filter((m) => m.prefix !== merchant.prefix));
+      onDone();
+    } catch {
+    } finally {
+      setSavingPrefix(null);
+    }
+  }
+
+  function handleBackdrop(e) {
+    if (e.target === backdropRef.current) onClose();
+  }
+
+  return (
+    <div className="modal-backdrop" ref={backdropRef} onClick={handleBackdrop}>
+      <div className="modal">
+        <div className="modal-header">
+          <h2>Classify Merchants</h2>
+          <button className="modal-close" type="button" onClick={onClose}>×</button>
+        </div>
+
+        {loading && <div className="top-bar-loading" />}
+
+        <div style={{ marginBottom: 20 }}>
+          <button
+            className="btn btn-primary"
+            style={{ width: "100%" }}
+            onClick={handleAutoClassify}
+            disabled={autoRunning || loading}
+          >
+            {autoRunning ? "Running…" : "Auto-classify from history"}
+          </button>
+          {autoResult && (
+            <div className={`msg ${autoResult.classified > 0 ? "msg-success" : "msg-error"}`} style={{ marginTop: 8 }}>
+              {autoResult.classified > 0
+                ? `${autoResult.classified} transaction${autoResult.classified !== 1 ? "s" : ""} classified automatically.${autoResult.unmatched > 0 ? ` ${autoResult.unmatched} still need review.` : ""}`
+                : "No historical matches found — classify some manually first."}
+            </div>
+          )}
+        </div>
+
+        {merchants.length > 0 && (
+          <p className="section-label" style={{ marginBottom: 12 }}>Manual</p>
+        )}
+
+        {!loading && merchants.length === 0 && (
+          <div className="empty-state" style={{ padding: "32px 0" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            All merchants classified
+          </div>
+        )}
+
+        {merchants.map((m) => (
+          <div key={m.prefix} style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{m.prefix}</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{m.count} transaction{m.count !== 1 ? "s" : ""}</span>
+            </div>
+            <div className="cat-pills">
+              {categories.map((c) => (
+                <button
+                  key={c.id}
+                  className={`cat-pill${savingPrefix === m.prefix ? " saving" : ""}`}
+                  onClick={() => assign(m, c.id)}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+            <div style={{ height: 1, background: "var(--border)", marginTop: 16 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Inline edit form (for expanded rows) ─────────────────────────────────────
 
 function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   const [form, setForm] = useState(initial);
@@ -72,12 +309,10 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
           <input type="number" name="amount" value={form.amount} onChange={handleChange} step="0.01" min="0" required placeholder="0.00" />
         </div>
       </div>
-
       <div className="field">
         <label className="field-label">Merchant</label>
         <input type="text" name="merchant_raw" value={form.merchant_raw} onChange={handleChange} placeholder="e.g. Whole Foods" />
       </div>
-
       <div className="txn-form-row">
         <div className="field">
           <label className="field-label">Direction</label>
@@ -96,14 +331,11 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
           </select>
         </div>
       </div>
-
       <div className="field">
         <label className="field-label">Notes</label>
         <input type="text" name="notes" value={form.notes} onChange={handleChange} />
       </div>
-
       {error && <div className="msg msg-error">{error}</div>}
-
       <div className="form-actions">
         <button className="btn btn-primary" type="submit" disabled={submitting} style={{ flex: 1 }}>
           {submitting ? "Saving…" : submitLabel}
@@ -114,7 +346,151 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   );
 }
 
+// ── Bottom-sheet add modal ────────────────────────────────────────────────────
+
+function AddModal({ categories, onClose, onSaved }) {
+  const [merchant, setMerchant] = useState("");
+  const [amount, setAmount] = useState("");
+  const [direction, setDirection] = useState("outflow");
+  const [categoryId, setCategoryId] = useState(null);
+  const [notes, setNotes] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function save(e) {
+    e.preventDefault();
+    if (!merchant.trim()) { setError("Merchant is required."); return; }
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      setError("Enter a valid amount."); return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const txn = await api.createTransaction({
+        merchant_raw: merchant.trim(),
+        amount: parseFloat(amount),
+        direction,
+        category_id: categoryId,
+        notes: notes.trim(),
+        transaction_at: date,
+      });
+      onSaved(txn);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Add Transaction</h2>
+          <button className="modal-close" type="button" onClick={onClose}>×</button>
+        </div>
+
+        <form onSubmit={save}>
+          <div className="form-stack">
+            {/* Direction toggle */}
+            <div className="field">
+              <label className="field-label">Direction</label>
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={direction === "outflow" ? "seg-active" : ""}
+                  onClick={() => setDirection("outflow")}
+                  style={direction === "outflow" ? { background: "var(--red)" } : {}}
+                >
+                  Money Out
+                </button>
+                <button
+                  type="button"
+                  className={direction === "inflow" ? "seg-active" : ""}
+                  onClick={() => setDirection("inflow")}
+                  style={direction === "inflow" ? { background: "var(--green)" } : {}}
+                >
+                  Money In
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label className="field-label">Merchant / Description</label>
+              <input
+                type="text"
+                value={merchant}
+                onChange={(e) => setMerchant(e.target.value)}
+                placeholder="e.g. Farmer's Market"
+                autoFocus
+              />
+            </div>
+
+            <div className="txn-form-row">
+              <div className="field">
+                <label className="field-label">Amount ($)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="field">
+                <label className="field-label">Date</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="field">
+              <label className="field-label">Category</label>
+              <CategoryPicker value={categoryId} onChange={setCategoryId} categories={categories} />
+            </div>
+
+            <div className="field">
+              <label className="field-label">Notes (optional)</label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Optional note"
+              />
+            </div>
+
+            {error && <div className="msg msg-error">{error}</div>}
+
+            <button className="btn btn-primary" type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Add Transaction"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Status filter pills ───────────────────────────────────────────────────────
+
+const STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "ignored", label: "Ignored" },
+];
+
+function needsReview(t) {
+  return t.category_id == null;
+}
+
+// ── Main Transactions page ────────────────────────────────────────────────────
+
 export default function Transactions() {
+  const [searchParams] = useSearchParams();
+  const { isOnline } = useOnline();
+
   const [transactions, setTransactions] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -122,22 +498,32 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
-  const [editingId, setEditingId] = useState(null);
-
-  // Filter state
-  const [filterCat, setFilterCat] = useState("");
+  // Filters — category pre-filled from URL param (Dashboard budget bar deep-link)
+  const [filterCat, setFilterCat] = useState(searchParams.get("category_id") || "");
+  const [filterStatus, setFilterStatus] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  // Modals
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showClassify, setShowClassify] = useState(false);
+
+  // Row state
+  const [expandedId, setExpandedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [assigningId, setAssigningId] = useState(null);
+  const [unclassifiedCount, setUnclassifiedCount] = useState(0);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  function buildParams(p) {
+  function buildParams(p, overrides = {}) {
+    const f = { filterCat, filterStatus, dateFrom, dateTo, ...overrides };
     const params = { limit: PAGE_SIZE, offset: p * PAGE_SIZE };
-    if (filterCat) params.category_id = parseInt(filterCat);
-    if (dateFrom) params.date_from = dateFrom;
-    if (dateTo) params.date_to = dateTo;
+    if (f.filterCat) params.category_id = parseInt(f.filterCat);
+    if (f.filterStatus) params.status = f.filterStatus;
+    if (f.dateFrom) params.date_from = f.dateFrom;
+    if (f.dateTo) params.date_to = f.dateTo;
     return params;
   }
 
@@ -146,53 +532,47 @@ export default function Transactions() {
     setError(null);
     api.getTransactions(buildParams(p))
       .then((data) => {
-        setTransactions(data.transactions);
-        setTotal(data.total);
+        setTransactions(data.transactions ?? data);
+        setTotal(data.total ?? (data.transactions ?? data).length);
         setPage(p);
         setExpandedId(null);
         setEditingId(null);
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        if (!isOnline) return;
+        setError(e.message);
+      })
       .finally(() => setLoading(false));
+  }
+
+  function refreshUnclassifiedCount() {
+    api.getUnclassifiedMerchants()
+      .then((list) => setUnclassifiedCount(list.length))
+      .catch(() => {});
   }
 
   useEffect(() => {
-    Promise.all([
-      api.getCategories(),
-      api.getTransactions({ limit: PAGE_SIZE, offset: 0 }),
-    ])
-      .then(([cats, data]) => {
+    Promise.all([api.getCategories(), api.getUnclassifiedMerchants()])
+      .then(([cats, merchants]) => {
         setCategories(cats);
-        setTransactions(data.transactions);
-        setTotal(data.total);
+        setUnclassifiedCount(merchants.length);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  function applyFilters() {
-    setPage(0);
-    setLoading(true);
-    setError(null);
-    const params = { limit: PAGE_SIZE, offset: 0 };
-    if (filterCat) params.category_id = parseInt(filterCat);
-    if (dateFrom) params.date_from = dateFrom;
-    if (dateTo) params.date_to = dateTo;
-    api.getTransactions(params)
-      .then((data) => {
-        setTransactions(data.transactions);
-        setTotal(data.total);
-        setExpandedId(null);
-        setEditingId(null);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
-
-  async function handleCreate(payload) {
-    await api.createTransaction(payload);
-    setShowCreate(false);
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPage(0);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when filters change (reset to page 0)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPage(0);
+  }, [filterCat, filterStatus, dateFrom, dateTo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleSaved(updated) {
+    setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    setEditingId(null);
+    setExpandedId(updated.id);
+    refreshUnclassifiedCount();
   }
 
   async function handleDelete(id) {
@@ -207,10 +587,23 @@ export default function Transactions() {
     }
   }
 
-  function handleSaved(updated) {
-    setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-    setEditingId(null);
-    setExpandedId(updated.id);
+  function handleAdded() {
+    setShowAdd(false);
+    fetchPage(0);
+    refreshUnclassifiedCount();
+  }
+
+  async function handleAssignCategory(txn, categoryId) {
+    setAssigningId(txn.id);
+    try {
+      const updated = await api.updateTransaction(txn.id, { category_id: categoryId });
+      setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setExpandedId(null);
+      refreshUnclassifiedCount();
+    } catch {
+    } finally {
+      setAssigningId(null);
+    }
   }
 
   function toggleRow(id) {
@@ -219,119 +612,251 @@ export default function Transactions() {
   }
 
   return (
-    <div className="page">
-      {loading && <div className="top-bar-loading" />}
+    <>
+      {!isOnline && <div className="offline-banner">📴 Offline — showing cached transactions</div>}
 
-      <div className="page-header">
-        <h1>Transactions</h1>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => { setShowCreate((v) => !v); setExpandedId(null); setEditingId(null); }}
-        >
-          {showCreate ? "Cancel" : "+ New"}
-        </button>
-      </div>
-
-      {showCreate && (
-        <div className="txn-form-wrap card" style={{ marginBottom: 12 }}>
-          <TxnForm
-            initial={EMPTY_FORM}
-            categories={categories}
-            onSave={handleCreate}
-            onCancel={() => setShowCreate(false)}
-            submitLabel="Create"
-          />
-        </div>
+      {showImport && (
+        <ImportModal
+          onClose={() => setShowImport(false)}
+          onImported={() => { fetchPage(0); refreshUnclassifiedCount(); }}
+        />
       )}
 
-      {/* Filter bar */}
-      <div className="filter-bar">
-        <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+      {showClassify && (
+        <ClassifyModal
+          categories={categories}
+          onClose={() => setShowClassify(false)}
+          onDone={() => { fetchPage(page); refreshUnclassifiedCount(); }}
+        />
+      )}
+
+      {showAdd && (
+        <AddModal
+          categories={categories}
+          onClose={() => setShowAdd(false)}
+          onSaved={handleAdded}
+        />
+      )}
+
+      <div className="page">
+        {loading && <div className="top-bar-loading" />}
+
+        <div className="page-header">
+          <h1>Transactions</h1>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowImport(true)}>
+              Import CSV
+            </button>
+            {unclassifiedCount > 0 && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ position: "relative", color: "var(--amber)", borderColor: "var(--amber)" }}
+                onClick={() => setShowClassify(true)}
+              >
+                Classify
+                <span style={{
+                  position: "absolute", top: -6, right: -6,
+                  background: "var(--amber)", color: "#000",
+                  fontSize: 10, fontWeight: 700,
+                  borderRadius: "999px", minWidth: 16, height: 16,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: "0 4px",
+                }}>{unclassifiedCount}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Status filter chips */}
+        <div className="filter-row" style={{ marginBottom: 12 }}>
+          {STATUS_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setFilterStatus(opt.value)}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 20,
+                fontSize: 13,
+                fontWeight: 600,
+                border: `1.5px solid ${filterStatus === opt.value ? "var(--primary)" : "var(--border)"}`,
+                background: filterStatus === opt.value ? "rgba(108,99,255,0.15)" : "transparent",
+                color: filterStatus === opt.value ? "var(--primary)" : "var(--text-muted)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                minHeight: 36,
+              }}
+            >
+              {opt.label}
+            </button>
           ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-      </div>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={applyFilters}>
-        Apply
-      </button>
-
-      {error && <div className="msg msg-error">{error}</div>}
-
-      {!loading && transactions.length === 0 && !error && (
-        <div className="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="2" y="5" width="20" height="14" rx="2" />
-            <path d="M2 10h20" />
-          </svg>
-          No transactions found
         </div>
-      )}
 
-      {transactions.length > 0 && (
-        <>
-          <div className="txn-list card">
-            {transactions.map((t) => (
-              <div className="txn-row" key={t.id}>
-                <div className="txn-row-main" onClick={() => toggleRow(t.id)}>
-                  <div>
-                    <div className="txn-merchant">{t.merchant_raw || "Untitled"}</div>
-                    <div className="txn-row-sub">{fmtDate(t.transaction_at)} · {t.category_name || "Uncategorized"}</div>
-                  </div>
-                  <span className={`txn-amount ${t.direction === "inflow" ? "text-green" : "text-red"}`}>
-                    {fmtAmt(t)}
-                  </span>
-                </div>
-
-                {expandedId === t.id && editingId !== t.id && (
-                  <div className="txn-expanded">
-                    <dl className="txn-meta">
-                      {t.notes && <><dt className="txn-meta-key">Notes</dt><dd className="txn-meta-val">{t.notes}</dd></>}
-                      <dt className="txn-meta-key">Direction</dt>
-                      <dd className="txn-meta-val">{t.direction === "inflow" ? "Credit" : "Debit"}</dd>
-                    </dl>
-                    <div className="txn-expanded-actions">
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => { setEditingId(t.id); setExpandedId(null); setShowCreate(false); }}
-                      >
-                        Edit
-                      </button>
-                      <button className="btn btn-sm" style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent" }} onClick={() => handleDelete(t.id)}>
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {editingId === t.id && (
-                  <div className="txn-expanded">
-                    <TxnForm
-                      initial={txnToForm(t)}
-                      categories={categories}
-                      onSave={async (payload) => {
-                        const updated = await api.updateTransaction(t.id, payload);
-                        handleSaved(updated);
-                      }}
-                      onCancel={() => { setEditingId(null); setExpandedId(t.id); }}
-                      submitLabel="Save"
-                    />
-                  </div>
-                )}
-              </div>
+        {/* Category + date filters */}
+        <div className="filter-bar">
+          <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-          </div>
+          </select>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </div>
 
-          <div className="pagination">
-            <button onClick={() => fetchPage(page - 1)} disabled={page === 0 || loading}>← Prev</button>
-            <span>{page + 1} / {totalPages}</span>
-            <button onClick={() => fetchPage(page + 1)} disabled={page >= totalPages - 1 || loading}>Next →</button>
+        {(filterCat || filterStatus || dateFrom || dateTo) && (
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ marginBottom: 12 }}
+            onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); }}
+          >
+            Clear filters
+          </button>
+        )}
+
+        {error && <div className="msg msg-error">{error}</div>}
+
+        {!loading && transactions.length === 0 && !error && (
+          <div className="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+            </svg>
+            No transactions found
           </div>
-        </>
-      )}
-    </div>
+        )}
+
+        {transactions.length > 0 && (
+          <>
+            <div className="txn-list card">
+              {transactions.map((t) => (
+                <div className="txn-row" key={t.id}>
+                  <div className="txn-row-main" onClick={() => toggleRow(t.id)}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="txn-merchant">
+                        {t.merchant_raw || "Untitled"}
+                        {t.notes?.startsWith("venmo:") && (
+                          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)", marginLeft: 6 }}>
+                            · {t.direction === "inflow" ? "From" : "To"} {t.notes.slice(6)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="txn-row-sub">
+                        {fmtDate(t.transaction_at)}
+                        {needsReview(t) ? (
+                          <span style={{
+                            marginLeft: 6,
+                            fontSize: 10, fontWeight: 600,
+                            color: "var(--amber)",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                          }}>· Needs Review</span>
+                        ) : (
+                          <span> · {t.category_name}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`txn-amount ${t.direction === "inflow" ? "text-green" : "text-red"}`}>
+                      {fmtAmt(t)}
+                    </span>
+                  </div>
+
+                  {expandedId === t.id && editingId !== t.id && (
+                    <div className="txn-expanded">
+                      {needsReview(t) ? (
+                        <>
+                          <p className="field-label" style={{ marginBottom: 8 }}>Categorize</p>
+                          <div className="cat-pills">
+                            {categories.map((c) => (
+                              <button
+                                key={c.id}
+                                className={`cat-pill${assigningId === t.id ? " saving" : ""}`}
+                                onClick={() => handleAssignCategory(t, c.id)}
+                              >
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="txn-expanded-actions" style={{ marginTop: 10 }}>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => { setEditingId(t.id); setExpandedId(null); }}
+                            >
+                              Edit details
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent" }}
+                              onClick={() => handleDelete(t.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <dl className="txn-meta">
+                            {t.notes && !t.notes.startsWith("venmo") && (
+                              <><dt className="txn-meta-key">Notes</dt><dd className="txn-meta-val">{t.notes}</dd></>
+                            )}
+                            <dt className="txn-meta-key">Type</dt>
+                            <dd className="txn-meta-val">
+                              {t.notes?.startsWith("venmo")
+                                ? `Venmo · ${t.direction === "inflow" ? "Received from" : "Sent to"} ${t.notes.slice(6)}`
+                                : t.direction === "inflow" ? "Credit" : "Debit"}
+                            </dd>
+                          </dl>
+                          <div className="txn-expanded-actions">
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => { setEditingId(t.id); setExpandedId(null); }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-sm"
+                              style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent" }}
+                              onClick={() => handleDelete(t.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {editingId === t.id && (
+                    <div className="txn-expanded">
+                      <TxnForm
+                        initial={txnToForm(t)}
+                        categories={categories}
+                        onSave={async (payload) => {
+                          const updated = await api.updateTransaction(t.id, payload);
+                          handleSaved(updated);
+                        }}
+                        onCancel={() => { setEditingId(null); setExpandedId(t.id); }}
+                        submitLabel="Save"
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="pagination">
+              <button onClick={() => fetchPage(page - 1)} disabled={page === 0 || loading}>← Prev</button>
+              <span>{page + 1} / {totalPages}</span>
+              <button onClick={() => fetchPage(page + 1)} disabled={page >= totalPages - 1 || loading}>Next →</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* FAB — add transaction */}
+      <button className="fab" onClick={() => setShowAdd(true)} aria-label="Add transaction" title="Add transaction">
+        +
+      </button>
+    </>
   );
 }

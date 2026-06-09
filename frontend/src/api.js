@@ -30,8 +30,13 @@ export const api = {
   logout: () => localStorage.removeItem(TOKEN_KEY),
 
   getDashboard: () => request("GET", "/api/dashboard"),
+  dashboard: () => request("GET", "/api/dashboard"),
 
   getTransactions: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/transactions${qs ? `?${qs}` : ""}`);
+  },
+  transactions: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/api/transactions${qs ? `?${qs}` : ""}`);
   },
@@ -41,11 +46,32 @@ export const api = {
   updateTransaction: (id, data) =>
     request("PUT", `/api/transactions/${id}`, data),
   deleteTransaction: (id) => request("DELETE", `/api/transactions/${id}`),
+  bulkCategorize: (merchant_raw, category_id) =>
+    request("POST", "/api/transactions/bulk-categorize", { merchant_raw, category_id }),
+  getUnclassifiedMerchants: () =>
+    request("GET", "/api/transactions/merchants/unclassified"),
+  autoClassify: () =>
+    request("POST", "/api/transactions/auto-classify"),
 
   getCategories: () => request("GET", "/api/categories"),
+  categories: () => request("GET", "/api/categories"),
+
+  queue: () => request("GET", "/api/queue"),
+  confirm: (id, data) => request("PUT", `/api/transactions/${id}`, { ...data, status: "confirmed" }),
+  ignore: (id) => request("PUT", `/api/transactions/${id}`, { status: "ignored" }),
+  autoCategorize: () => request("POST", "/api/transactions/auto-classify"),
+
+  insights: () => request("GET", "/api/insights"),
+  weeklyInsight: (offset = 0) => request("GET", `/api/insights/weekly?offset=${offset}`),
+  monthlyInsight: (year, month) => request("GET", `/api/insights/monthly?year=${year}&month=${month}`),
 
   getProfile: () => request("GET", "/api/profile"),
   updateProfile: (data) => request("PUT", "/api/profile", data),
+  updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
+
+  sync: () => request("POST", "/api/sync"),
+  syncNow: () => request("POST", "/api/sync"),
+  syncStatus: () => request("GET", "/api/sync/status"),
 
   importTransactions: (sourceType, files) => {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -69,10 +95,6 @@ export const api = {
       }
     );
   },
-
-  updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
-
-  sync: () => request("POST", "/api/sync"),
 
   admin: {
     listUsers: () => request("GET", "/api/admin/users"),

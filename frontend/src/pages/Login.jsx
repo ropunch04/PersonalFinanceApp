@@ -50,7 +50,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="form-stack">
           <div className="field">
-            <label className="field-label">Username</label>
+            <label className="field-label">Username or Email</label>
             <input
               type="text"
               value={username}

@@ -98,11 +98,17 @@ function UserRow({ user, currentUserId, onUpdated, onDeleted }) {
 
       {expanded && (
         <div className="admin-user-expanded">
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {!isSelf && (
-              <button className="btn btn-ghost btn-sm" onClick={handleToggleAdmin} disabled={busy}>
-                {user.is_admin ? "Revoke Admin" : "Make Admin"}
-              </button>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={user.is_admin}
+                  onChange={handleToggleAdmin}
+                  disabled={busy}
+                />
+                Admin
+              </label>
             )}
             <button
               className="btn btn-ghost btn-sm"
@@ -180,10 +186,10 @@ function CreateUserForm({ onCreated }) {
       <form onSubmit={handleSubmit}>
         <div className="form-stack">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <input name="username" placeholder="Username" value={form.username} onChange={handleChange} required />
-            <input name="email" type="email" placeholder="Email" value={form.email} onChange={handleChange} required />
+            <input name="username" placeholder="Username" value={form.username} onChange={handleChange} required autoComplete="off" />
+            <input name="email" type="text" placeholder="Email" value={form.email} onChange={handleChange} required autoComplete="off" />
           </div>
-          <input name="password" type="password" placeholder="Password (min 8 chars)" value={form.password} onChange={handleChange} required minLength={8} />
+          <input name="password" type="password" placeholder="Password (min 8 chars)" value={form.password} onChange={handleChange} required minLength={8} autoComplete="new-password" />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <label className="checkbox-label">
               <input name="is_admin" type="checkbox" checked={form.is_admin} onChange={handleChange} />
@@ -213,7 +219,6 @@ export default function Admin() {
   try {
     currentUserId = JSON.parse(atob(token.split(".")[1])).sub;
   } catch {
-    // token missing or malformed
   }
 
   useEffect(() => {

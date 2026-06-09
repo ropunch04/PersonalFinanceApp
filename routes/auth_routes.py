@@ -58,10 +58,10 @@ def register():
 @bp.post("/login")
 def login():
     body = request.get_json(silent=True) or {}
-    username = body.get("username", "").strip()
+    identifier = body.get("username", "").strip()
     password = body.get("password", "")
 
-    row = get_user_by_username(username)
+    row = get_user_by_username(identifier) or get_user_by_email(identifier)
     if not row:
         return _GENERIC_LOGIN_ERROR, 401
 
@@ -112,9 +112,11 @@ def me():
     if not row:
         return {"error": "User not found"}, 404
     return {
-        "user_id": row["id"],
-        "username": row["username"],
-        "email": row["email"],
-        "is_admin": bool(row["is_admin"]),
-        "last_login_at": row["last_login_at"],
+        "data": {
+            "id": row["id"],
+            "username": row["username"],
+            "email": row["email"],
+            "is_admin": bool(row["is_admin"]),
+            "last_login_at": row["last_login_at"],
+        }
     }

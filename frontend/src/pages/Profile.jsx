@@ -39,22 +39,20 @@ function PwField({ label, value, onChange, autoComplete, placeholder }) {
   );
 }
 
-export default function Profile() {
-  const { logout } = useAuth();
+export default function Profile({ setup = false }) {
+  const { logout, user: authUser } = useAuth();
   const navigate = useNavigate();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Budget state
   const [income, setIncome] = useState("");
   const [savingsTarget, setSavingsTarget] = useState("");
   const [budgets, setBudgets] = useState([]);
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState(null);
 
-  // Gmail state
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [savingGmail, setSavingGmail] = useState(false);
@@ -62,7 +60,7 @@ export default function Profile() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
 
-  // Password state
+  const [showChangePw, setShowChangePw] = useState(false);
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -97,6 +95,7 @@ export default function Profile() {
       });
       setProfile(updated);
       setBudgetMsg("Saved.");
+      if (setup) navigate("/");
     } catch (err) {
       setBudgetMsg(`Error: ${err.message}`);
     } finally {
@@ -111,6 +110,7 @@ export default function Profile() {
     try {
       await api.updateGmail({ gmail_address: gmailAddress, app_password: appPassword });
       setAppPassword("");
+      setProfile((p) => ({ ...p, gmail_configured: true, gmail_address: gmailAddress }));
       setGmailMsg("Gmail credentials saved.");
     } catch (err) {
       setGmailMsg(`Error: ${err.message}`);
@@ -169,9 +169,15 @@ export default function Profile() {
 
   return (
     <div className="page">
-      <div className="page-header"><h1>Profile</h1></div>
+      <div className="page-header">
+        <h1>{setup ? "Set Up Profile" : "Profile"}</h1>
+        {setup && (
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate("/")}>
+            Skip
+          </button>
+        )}
+      </div>
 
-      {/* BUDGET */}
       <div className="profile-block">
         <p className="section-label">Budget</p>
         <div className="card">
@@ -240,7 +246,6 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* GMAIL SYNC */}
       <div className="profile-block">
         <p className="section-label">Gmail Sync</p>
         <div className="card">
@@ -254,18 +259,18 @@ export default function Profile() {
               <div className="field">
                 <label className="field-label">Gmail Address</label>
                 <input
-                  type="email"
+                  type="text"
                   value={gmailAddress}
                   onChange={(e) => setGmailAddress(e.target.value)}
                   placeholder="you@gmail.com"
-                  autoComplete="email"
+                  autoComplete="off"
                 />
               </div>
               <PwField
                 label="App Password"
                 value={appPassword}
                 onChange={(e) => setAppPassword(e.target.value)}
-                autoComplete="off"
+                autoComplete="new-password"
                 placeholder={profile.gmail_configured ? "••••••••••••••••" : ""}
               />
               {gmailMsg && (
@@ -298,40 +303,68 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* ACCOUNT */}
       <div className="profile-block">
         <p className="section-label">Account</p>
         <div className="card">
-          <form onSubmit={handleChangePassword}>
-            <div className="form-stack">
-              <PwField
-                label="Current Password"
-                value={currentPw}
-                onChange={(e) => setCurrentPw(e.target.value)}
-                autoComplete="current-password"
-              />
-              <PwField
-                label="New Password"
-                value={newPw}
-                onChange={(e) => setNewPw(e.target.value)}
-                autoComplete="new-password"
-              />
-              <PwField
-                label="Confirm New Password"
-                value={confirmPw}
-                onChange={(e) => setConfirmPw(e.target.value)}
-                autoComplete="new-password"
-              />
-              {pwMsg && (
-                <div className={`msg ${pwMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
-                  {pwMsg}
-                </div>
-              )}
-              <button className="btn btn-primary" type="submit" disabled={changingPw}>
-                {changingPw ? "Changing…" : "Change Password"}
-              </button>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)" }}>
+              {authUser?.username}
             </div>
-          </form>
+            {authUser?.email && (
+              <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>
+                {authUser.email}
+              </div>
+            )}
+            {authUser?.is_admin && (
+              <div style={{ fontSize: 11, color: "var(--primary)", fontWeight: 500, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Admin
+              </div>
+            )}
+          </div>
+
+          <div className="divider" style={{ margin: "0 0 16px" }} />
+
+          <button
+            className="btn btn-ghost"
+            type="button"
+            style={{ width: "100%", marginBottom: showChangePw ? 16 : 0 }}
+            onClick={() => { setShowChangePw((v) => !v); setPwMsg(null); }}
+          >
+            {showChangePw ? "Cancel" : "Change Password"}
+          </button>
+
+          {showChangePw && (
+            <form onSubmit={handleChangePassword}>
+              <div className="form-stack">
+                <PwField
+                  label="Current Password"
+                  value={currentPw}
+                  onChange={(e) => setCurrentPw(e.target.value)}
+                  autoComplete="current-password"
+                />
+                <PwField
+                  label="New Password"
+                  value={newPw}
+                  onChange={(e) => setNewPw(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <PwField
+                  label="Confirm New Password"
+                  value={confirmPw}
+                  onChange={(e) => setConfirmPw(e.target.value)}
+                  autoComplete="new-password"
+                />
+                {pwMsg && (
+                  <div className={`msg ${pwMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                    {pwMsg}
+                  </div>
+                )}
+                <button className="btn btn-primary" type="submit" disabled={changingPw}>
+                  {changingPw ? "Changing…" : "Change Password"}
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="divider" />
 

@@ -1,11 +1,14 @@
 import hashlib
 import imaplib
+import logging
 import re
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email.message import Message
 
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 _IMAP_HOST = "imap.gmail.com"
 _IMAP_PORT = 993
@@ -30,6 +33,10 @@ _CREDIT_DATE = re.compile(r"(\w+\.\s*\d{1,2},?\s*\d{4})")
 
 _VENMO_PAID = re.compile(r"paid you \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
 _VENMO_CHARGE = re.compile(r"you paid (?:.+?) \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
+# Subject-line name extractors (reliable — not contaminated by HTML table layout)
+_VENMO_SUBJ_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE)
+_VENMO_SUBJ_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
+# Body fallbacks (used when subject doesn't match)
 _VENMO_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE | re.MULTILINE)
 _VENMO_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
 
@@ -65,7 +72,7 @@ def _parse_cap1_date(text: str) -> str:
     m = _CAP1_DATE.search(text)
     if m:
         raw = next(g for g in m.groups() if g).strip()
-        cleaned = raw.replace(".", "").replace(",", "")  # "May. 26 2026" → "May 26 2026"
+        cleaned = raw.replace(".", "").replace(",", "")
         for fmt in ("%B %d %Y", "%b %d %Y", "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
             try:
                 return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%dT00:00:00")
@@ -148,24 +155,33 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
     if paid_m:
         amount = float(paid_m.group(1).replace(",", ""))
         direction = "inflow"
-        from_m = _VENMO_FROM.search(text)
-        merchant_raw = from_m.group(1).strip() if from_m else "Venmo"
+        subj_m = _VENMO_SUBJ_FROM.search(subject)
+        if subj_m:
+            merchant_raw = subj_m.group(1).strip()
+        else:
+            body_m = _VENMO_FROM.search(text)
+            merchant_raw = body_m.group(1).strip() if body_m else "Venmo"
     elif charge_m:
         amount = float(charge_m.group(1).replace(",", ""))
         direction = "outflow"
-        to_m = _VENMO_TO.search(text)
-        merchant_raw = to_m.group(1).strip() if to_m else "Venmo"
+        subj_m = _VENMO_SUBJ_TO.search(subject)
+        if subj_m:
+            merchant_raw = subj_m.group(1).strip()
+        else:
+            body_m = _VENMO_TO.search(text)
+            merchant_raw = body_m.group(1).strip() if body_m else "Venmo"
     else:
         return None
 
+    person = merchant_raw
     return {
         "amount": amount,
         "direction": direction,
-        "merchant_raw": merchant_raw,
-        "category_id": _get_category_id(conn, merchant_raw) if conn else None,
+        "merchant_raw": "Venmo",
+        "category_id": _get_category_id(conn, "Venmo") if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("venmo_email", message_id),
-        "notes": None,
+        "notes": f"venmo:{person}",
     }
 
 

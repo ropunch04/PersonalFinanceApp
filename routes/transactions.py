@@ -1,9 +1,15 @@
+import re
 from datetime import datetime, timezone
 
 from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
+
+
+def _merchant_prefix(name: str) -> str:
+    cleaned = re.sub(r"\s+[#*]?\d{3,}.*$", "", name.strip()).strip()
+    return cleaned if cleaned else name.strip()
 
 bp = Blueprint("transactions", __name__, url_prefix="/api")
 
@@ -41,10 +47,14 @@ def list_transactions():
     except (TypeError, ValueError):
         return _err("Invalid query parameters", 400)
 
+    uncategorized = request.args.get("uncategorized", "false").lower() == "true"
+
     where_clauses = []
     params: list = []
 
-    if category_id is not None:
+    if uncategorized:
+        where_clauses.append("t.category_id IS NULL")
+    elif category_id is not None:
         where_clauses.append("t.category_id = ?")
         params.append(category_id)
     if date_from:
@@ -173,3 +183,88 @@ def delete_transaction(txn_id):
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     db.commit()
     return _ok({"deleted": True})
+
+
+@bp.get("/transactions/merchants/unclassified")
+@require_auth
+def unclassified_merchants():
+    db = get_user_db(g.current_user["user_id"])
+    rows = db.execute(
+        "SELECT merchant_raw, COUNT(*) as count FROM transactions WHERE category_id IS NULL GROUP BY merchant_raw"
+    ).fetchall()
+
+    groups: dict[str, dict] = {}
+    for row in rows:
+        prefix = _merchant_prefix(row["merchant_raw"])
+        if prefix not in groups:
+            groups[prefix] = {"prefix": prefix, "count": 0, "example": row["merchant_raw"]}
+        groups[prefix]["count"] += row["count"]
+
+    return _ok(sorted(groups.values(), key=lambda x: -x["count"]))
+
+
+@bp.post("/transactions/auto-classify")
+@require_auth
+def auto_classify():
+    db = get_user_db(g.current_user["user_id"])
+
+    uncategorized = db.execute(
+        "SELECT id, merchant_raw FROM transactions WHERE category_id IS NULL"
+    ).fetchall()
+
+    if not uncategorized:
+        return _ok({"classified": 0, "unmatched": 0})
+
+    prefix_groups: dict[str, list[int]] = {}
+    for row in uncategorized:
+        prefix = _merchant_prefix(row["merchant_raw"])
+        prefix_groups.setdefault(prefix, []).append(row["id"])
+
+    classified = 0
+    unmatched = 0
+
+    for prefix, ids in prefix_groups.items():
+        best = db.execute(
+            """
+            SELECT category_id, COUNT(*) AS freq
+            FROM transactions
+            WHERE category_id IS NOT NULL AND merchant_raw LIKE ?
+            GROUP BY category_id
+            ORDER BY freq DESC
+            LIMIT 1
+            """,
+            (f"{prefix}%",),
+        ).fetchone()
+
+        if best:
+            placeholders = ",".join("?" * len(ids))
+            db.execute(
+                f"UPDATE transactions SET category_id = ? WHERE id IN ({placeholders})",
+                [best["category_id"]] + ids,
+            )
+            classified += len(ids)
+        else:
+            unmatched += len(ids)
+
+    db.commit()
+    return _ok({"classified": classified, "unmatched": unmatched})
+
+
+@bp.post("/transactions/bulk-categorize")
+@require_auth
+def bulk_categorize():
+    db = get_user_db(g.current_user["user_id"])
+    body = request.get_json(silent=True) or {}
+    merchant_raw = body.get("merchant_raw", "").strip()
+    category_id = body.get("category_id")
+
+    if not merchant_raw or category_id is None:
+        return _err("merchant_raw and category_id are required", 400)
+
+    prefix = _merchant_prefix(merchant_raw)
+    result = db.execute(
+        "UPDATE transactions SET category_id = ? WHERE category_id IS NULL AND merchant_raw LIKE ?",
+        (category_id, f"{prefix}%"),
+    )
+    db.commit()
+    return _ok({"updated": result.rowcount, "prefix": prefix})

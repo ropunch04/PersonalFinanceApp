@@ -12,14 +12,11 @@ def _source_hash(
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _get_category_id(conn, merchant_raw: str) -> int:
+def _get_category_id(conn, merchant_raw: str) -> int | None:
     row = conn.execute(
         "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
     ).fetchone()
-    if row:
-        return row["id"]
-    other = conn.execute("SELECT id FROM categories WHERE LOWER(name) = 'other'").fetchone()
-    return other["id"] if other else None
+    return row["id"] if row else None
 
 
 def _parse_amount(raw: str) -> float:
@@ -107,6 +104,11 @@ def parse_venmo_csv(stream, conn) -> tuple[list[dict], list[dict]]:
             transaction_at = row.get("Datetime", "").strip()
             merchant_raw = row.get("Note", "").strip()
 
+            from_name = (row.get("From") or row.get(" From") or "").strip()
+            to_name = (row.get("To") or row.get(" To") or "").strip()
+            person = from_name if direction == "inflow" else to_name
+            notes = f"venmo:{person}" if person else "venmo"
+
             transactions.append(
                 {
                     "amount": amount,
@@ -117,6 +119,7 @@ def parse_venmo_csv(stream, conn) -> tuple[list[dict], list[dict]]:
                     "source_hash": _source_hash(
                         "venmo", transaction_at, amount, merchant_raw, row_num
                     ),
+                    "notes": notes,
                 }
             )
 
