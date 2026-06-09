@@ -254,6 +254,14 @@ export default function Profile({ setup = false }) {
               Last synced: {new Date(profile.last_synced_at).toLocaleString()}
             </p>
           )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ marginBottom: 14, width: "100%", justifyContent: "center" }}
+            onClick={() => navigate("/gmail-setup")}
+          >
+            How to set this up →
+          </button>
           <form onSubmit={handleSaveGmail}>
             <div className="form-stack">
               <div className="field">

@@ -29,8 +29,40 @@ export const api = {
   me: () => request("GET", "/api/auth/me"),
   logout: () => localStorage.removeItem(TOKEN_KEY),
 
-  getDashboard: () => request("GET", "/api/dashboard"),
-  dashboard: () => request("GET", "/api/dashboard"),
+  getComparison: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/dashboard/comparison${qs ? `?${qs}` : ""}`);
+  },
+
+  getMerchants: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/dashboard/merchants${qs ? `?${qs}` : ""}`);
+  },
+
+  getTrend: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/dashboard/trend${qs ? `?${qs}` : ""}`);
+  },
+
+  getDashboard: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/dashboard${qs ? `?${qs}` : ""}`);
+  },
+  dashboard: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/dashboard${qs ? `?${qs}` : ""}`);
+  },
+
+  getDuplicates: () => request("GET", "/api/transactions/duplicates"),
+
+  getLinkableOutflows: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request("GET", `/api/transactions/linkable-outflows${qs ? `?${qs}` : ""}`);
+  },
+  linkReimbursement: (inflowId, outflowId) =>
+    request("PUT", `/api/transactions/${inflowId}`, { reimburses_id: outflowId }),
+  unlinkReimbursement: (inflowId) =>
+    request("PUT", `/api/transactions/${inflowId}`, { reimburses_id: null }),
 
   getTransactions: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

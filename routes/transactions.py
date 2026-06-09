@@ -15,9 +15,17 @@ bp = Blueprint("transactions", __name__, url_prefix="/api")
 
 _TXN_SELECT = """
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
-           c.name AS category_name, t.notes, t.transaction_at, t.created_at
+           c.name AS category_name, t.notes, t.transaction_at, t.created_at,
+           t.reimburses_id,
+           rt.merchant_raw    AS reimburses_merchant,
+           rt.amount          AS reimburses_amount,
+           rt.transaction_at  AS reimburses_date,
+           (SELECT ri.id          FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_id,
+           (SELECT ri.amount      FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_amount,
+           (SELECT ri.merchant_raw FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_merchant
     FROM transactions t
-    LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN categories c  ON t.category_id = c.id
+    LEFT JOIN transactions rt ON rt.id = t.reimburses_id
 """
 
 
@@ -48,12 +56,17 @@ def list_transactions():
         return _err("Invalid query parameters", 400)
 
     uncategorized = request.args.get("uncategorized", "false").lower() == "true"
+    status = request.args.get("status")
+    q = request.args.get("q", "").strip()
+    source = request.args.get("source", "")
 
     where_clauses = []
     params: list = []
 
-    if uncategorized:
+    if uncategorized or status == "pending":
         where_clauses.append("t.category_id IS NULL")
+    elif status == "confirmed":
+        where_clauses.append("t.category_id IS NOT NULL")
     elif category_id is not None:
         where_clauses.append("t.category_id = ?")
         params.append(category_id)
@@ -63,6 +76,16 @@ def list_transactions():
     if date_to:
         where_clauses.append("t.transaction_at <= ?")
         params.append(date_to + "T23:59:59")
+    if q:
+        where_clauses.append(
+            "(t.merchant_raw LIKE ? OR t.notes LIKE ? OR CAST(t.amount AS TEXT) LIKE ?)"
+        )
+        like = f"%{q}%"
+        params.extend([like, like, like])
+    if source == "venmo":
+        where_clauses.append("(t.notes LIKE 'venmo:%' OR t.notes = 'venmo')")
+    elif source == "credit":
+        where_clauses.append("(t.notes IS NULL OR (t.notes NOT LIKE 'venmo:%' AND t.notes != 'venmo'))")
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -147,7 +170,7 @@ def update_transaction(txn_id):
         return _err("Transaction not found", 404)
 
     body = request.get_json(silent=True) or {}
-    allowed = {"amount", "direction", "merchant_raw", "category_id", "notes", "transaction_at"}
+    allowed = {"amount", "direction", "merchant_raw", "category_id", "notes", "transaction_at", "reimburses_id"}
     updates = {k: v for k, v in body.items() if k in allowed}
 
     if not updates:
@@ -161,6 +184,19 @@ def update_transaction(txn_id):
             updates["amount"] = float(updates["amount"])
         except (TypeError, ValueError):
             return _err("amount must be a number", 400)
+
+    if "reimburses_id" in updates:
+        rid = updates["reimburses_id"]
+        if rid is not None:
+            if rid == txn_id:
+                return _err("A transaction cannot reimburse itself", 400)
+            target = db.execute(
+                "SELECT id, direction FROM transactions WHERE id = ?", (rid,)
+            ).fetchone()
+            if target is None:
+                return _err("Linked transaction not found", 404)
+            if target["direction"] != "outflow":
+                return _err("reimburses_id must point to an outflow transaction", 400)
 
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     values = list(updates.values()) + [txn_id]
@@ -180,6 +216,7 @@ def delete_transaction(txn_id):
     if existing is None:
         return _err("Transaction not found", 404)
 
+    db.execute("UPDATE transactions SET reimburses_id = NULL WHERE reimburses_id = ?", (txn_id,))
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     db.commit()
     return _ok({"deleted": True})
@@ -190,7 +227,7 @@ def delete_transaction(txn_id):
 def unclassified_merchants():
     db = get_user_db(g.current_user["user_id"])
     rows = db.execute(
-        "SELECT merchant_raw, COUNT(*) as count FROM transactions WHERE category_id IS NULL GROUP BY merchant_raw"
+        "SELECT merchant_raw, COUNT(*) as count FROM transactions WHERE category_id IS NULL AND (notes IS NULL OR notes NOT LIKE 'venmo:%') GROUP BY merchant_raw"
     ).fetchall()
 
     groups: dict[str, dict] = {}
@@ -209,7 +246,7 @@ def auto_classify():
     db = get_user_db(g.current_user["user_id"])
 
     uncategorized = db.execute(
-        "SELECT id, merchant_raw FROM transactions WHERE category_id IS NULL"
+        "SELECT id, merchant_raw FROM transactions WHERE category_id IS NULL AND (notes IS NULL OR notes NOT LIKE 'venmo:%')"
     ).fetchall()
 
     if not uncategorized:
@@ -268,3 +305,61 @@ def bulk_categorize():
     )
     db.commit()
     return _ok({"updated": result.rowcount, "prefix": prefix})
+
+
+@bp.get("/transactions/linkable-outflows")
+@require_auth
+def linkable_outflows():
+    db = get_user_db(g.current_user["user_id"])
+    q = request.args.get("q", "").strip()
+    limit = min(request.args.get("limit", default=20, type=int), 100)
+
+    where = "WHERE t.direction = 'outflow'"
+    params = []
+    if q:
+        where += " AND t.merchant_raw LIKE ?"
+        params.append(f"%{q}%")
+
+    rows = db.execute(f"""
+        SELECT t.id, t.amount, t.merchant_raw, t.transaction_at,
+               c.name AS category_name
+        FROM transactions t
+        LEFT JOIN categories c ON t.category_id = c.id
+        {where}
+        ORDER BY t.transaction_at DESC
+        LIMIT ?
+    """, params + [limit]).fetchall()
+
+    return _ok([dict(r) for r in rows])
+
+
+@bp.get("/transactions/duplicates")
+@require_auth
+def find_duplicates():
+    db = get_user_db(g.current_user["user_id"])
+
+    rows = db.execute("""
+        SELECT t.id, t.amount, t.merchant_raw, t.direction,
+               t.transaction_at, t.notes, c.name AS category_name
+        FROM transactions t
+        LEFT JOIN categories c ON t.category_id = c.id
+        INNER JOIN (
+            SELECT transaction_at, amount, merchant_raw, direction
+            FROM transactions
+            GROUP BY transaction_at, amount, merchant_raw, direction
+            HAVING COUNT(*) > 1
+        ) dups
+            ON  t.transaction_at = dups.transaction_at
+            AND t.amount         = dups.amount
+            AND COALESCE(t.merchant_raw, '') = COALESCE(dups.merchant_raw, '')
+            AND t.direction      = dups.direction
+        ORDER BY t.merchant_raw, t.transaction_at, t.amount, t.id
+    """).fetchall()
+
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for r in rows:
+        key = f"{r['transaction_at']}|{r['amount']}|{r['merchant_raw']}|{r['direction']}"
+        groups.setdefault(key, []).append(dict(r))
+
+    return _ok({"groups": list(groups.values())})

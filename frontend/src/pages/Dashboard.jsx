@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useOnline } from "../context/OnlineContext";
+import { useDashboardFilters, RANGES } from "../hooks/useDashboardFilters";
+import { usePwaSync } from "../hooks/usePwaSync";
+import CategoryBreakdown from "../components/CategoryBreakdown";
+import CategoryDonut from "../components/CategoryDonut";
+import SpendingTrendChart from "../components/SpendingTrendChart";
+import MerchantInsights from "../components/MerchantInsights";
+import ComparisonCard from "../components/ComparisonCard";
 
 function fmt(n) {
   return new Intl.NumberFormat("en-US", {
@@ -14,7 +21,8 @@ function fmt(n) {
 function formatSyncAge(lastSyncedAt) {
   if (!lastSyncedAt) return null;
   try {
-    const dt = new Date(lastSyncedAt + (lastSyncedAt.endsWith("Z") ? "" : "Z"));
+    const dt = new Date(lastSyncedAt);
+    if (isNaN(dt.getTime())) return null;
     const diffMs = Date.now() - dt.getTime();
     const diffMins = Math.floor(diffMs / 60000);
     if (diffMins < 1) return "just now";
@@ -79,22 +87,36 @@ export default function Dashboard({ onQueueChange }) {
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const navigate = useNavigate();
   const { isOnline } = useOnline();
+  const { range, setRange, dateParams } = useDashboardFilters();
 
   useEffect(() => {
-    load();
-    api.syncStatus().then(setSyncStatus).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    load(dateParams);
+  }, [dateParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function load() {
+  useEffect(() => {
+    api.syncStatus().then(setSyncStatus).catch(() => {});
+  }, []);
+
+  usePwaSync({
+    credentialsConfigured: syncStatus?.credentials_configured ?? false,
+    lastSyncedAt: syncStatus?.last_synced_at ?? null,
+    onSynced: async (result) => {
+      const status = await api.syncStatus().catch(() => null);
+      if (status) setSyncStatus(status);
+      if (result?.new_transactions > 0 || result?.imported > 0) load(dateParams);
+    },
+  });
+
+  async function load(params) {
     setLoading(true);
     try {
-      const d = await api.getDashboard();
+      const d = await api.getDashboard(params);
       setData(d);
       if (onQueueChange) onQueueChange(d.pending_count ?? 0);
     } catch {
-      // keep stale data if offline
     } finally {
       setLoading(false);
     }
@@ -109,13 +131,12 @@ export default function Dashboard({ onQueueChange }) {
       setSyncStatus(status);
       if (result?.new_transactions > 0 || result?.imported > 0) load();
     } catch {
-      // swallow
     } finally {
       setRefreshing(false);
     }
   }
 
-  if (loading) return <div className="top-bar-loading" />;
+  if (loading && !data) return <div className="top-bar-loading" />;
 
   if (!data) return (
     <div className="page">
@@ -124,13 +145,14 @@ export default function Dashboard({ onQueueChange }) {
     </div>
   );
 
-  const { pending_count, summary } = data;
+  const { pending_count, by_category } = data;
   const spent = data.total_spent ?? 0;
-  const income = summary?.monthly_income ?? 0;
+  const income = data.monthly_income ?? 0;
   const net = income - spent;
 
   return (
     <>
+      {loading && <div className="top-bar-loading" />}
       {!isOnline && <div className="offline-banner">📴 Offline — showing cached data</div>}
 
       <div className="page">
@@ -161,8 +183,21 @@ export default function Dashboard({ onQueueChange }) {
           )}
         </div>
 
+        {/* Time range pills */}
+        <div className="range-pills">
+          {RANGES.map((r) => (
+            <button
+              key={r.value}
+              className={`range-pill${range === r.value ? " active" : ""}`}
+              onClick={() => setRange(r.value)}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
         {/* Money summary */}
-        <div className="summary-grid" style={{ marginBottom: 24 }}>
+        <div className="summary-grid" style={{ marginBottom: 20 }}>
           <div className="stat-tile">
             <span className="stat-value text-red">{fmt(spent)}</span>
             <span className="stat-label">Money Out</span>
@@ -182,6 +217,26 @@ export default function Dashboard({ onQueueChange }) {
             </div>
           )}
         </div>
+
+        {/* Period comparison */}
+        <ComparisonCard dateParams={dateParams} />
+
+        {/* Spending trend chart */}
+        <SpendingTrendChart dateParams={dateParams} monthlyIncome={income} />
+
+        {/* Category donut + breakdown */}
+        <CategoryDonut
+          categories={by_category}
+          selectedId={selectedCategoryId}
+          onSelect={setSelectedCategoryId}
+        />
+        <CategoryBreakdown
+          categories={by_category}
+          selectedId={selectedCategoryId}
+        />
+
+        {/* Merchant insights */}
+        <MerchantInsights dateParams={dateParams} />
       </div>
     </>
   );

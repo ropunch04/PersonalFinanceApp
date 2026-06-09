@@ -95,7 +95,7 @@ def scheduled_sync_all() -> None:
             continue
 
         result = sync_user(user_id)
-        if "error" in result:
+        if result.get("error"):
             logger.error(
                 "sync failed for user %s (%s): %s", user_id, user["username"], result["error"]
             )
@@ -104,6 +104,6 @@ def scheduled_sync_all() -> None:
                 "synced user %s (%s): %d new, %d parse errors",
                 user_id,
                 user["username"],
-                result["synced"],
+                result.get("imported", 0),
                 len(result.get("errors", [])),
             )

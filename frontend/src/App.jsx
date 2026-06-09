@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { OnlineProvider } from "./context/OnlineContext";
@@ -9,8 +9,8 @@ import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
+import GmailSetup from "./pages/GmailSetup";
 import InstallPrompt from "./components/InstallPrompt";
-import { api } from "./api";
 
 function IconDashboard() {
   return (
@@ -86,6 +86,7 @@ function AppRoutes({ setPendingCount }) {
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
       <Route path="/profile/setup" element={<ProtectedRoute><Profile setup /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="/gmail-setup" element={<ProtectedRoute><GmailSetup /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -93,16 +94,6 @@ function AppRoutes({ setPendingCount }) {
 
 function AppContent() {
   const [pendingCount, setPendingCount] = useState(0);
-  const { isAuthenticated } = useAuth();
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    api.queue().then((d) => setPendingCount(d.count ?? 0)).catch(() => {});
-    const interval = setInterval(() => {
-      api.queue().then((d) => setPendingCount(d.count ?? 0)).catch(() => {});
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
 
   return (
     <>

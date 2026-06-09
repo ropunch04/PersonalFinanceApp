@@ -40,7 +40,16 @@ def import_transactions():
 
     all_rows, all_errors = [], []
     for upload in files:
-        stream = io.StringIO(upload.stream.read().decode("utf-8-sig"))
+        raw = upload.stream.read()
+        for encoding in ("utf-8-sig", "latin-1"):
+            try:
+                stream = io.StringIO(raw.decode(encoding))
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            all_errors.append({"file": upload.filename, "reason": "Could not decode file — unknown encoding"})
+            continue
         rows, errors = parse(stream, conn)
         all_rows.extend(rows)
         all_errors.extend(errors)

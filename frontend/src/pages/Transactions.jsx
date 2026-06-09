@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import CategoryPicker from "../components/CategoryPicker";
+import DuplicatesModal from "../components/DuplicatesModal";
+import ReimbursePickerModal from "../components/ReimbursePickerModal";
 import { useOnline } from "../context/OnlineContext";
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 const SOURCE_TYPES = [
   { value: "capitalone", label: "Capital One" },
@@ -35,7 +35,25 @@ function fmtDate(s) {
   return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-// ── Import CSV modal (unchanged) ──────────────────────────────────────────────
+function venmoLabel(notes, direction, expanded = false) {
+  if (!notes?.startsWith("venmo:")) return null;
+  const rest = notes.slice(6);
+  let type, person;
+  if (rest.startsWith("payment:")) {
+    type = "payment";
+    person = rest.slice(8);
+  } else if (rest.startsWith("charge:")) {
+    type = "charge";
+    person = rest.slice(7);
+  } else {
+    person = rest;
+    type = "payment";
+  }
+  if (direction === "inflow") return expanded ? `Received from ${person}` : `From ${person}`;
+  if (type === "charge") return expanded ? `Charged by ${person}` : `From ${person}`;
+  return expanded ? `Sent to ${person}` : `To ${person}`;
+}
+
 
 function ImportModal({ onClose, onImported }) {
   const [sourceType, setSourceType] = useState("capitalone");
@@ -151,7 +169,6 @@ function ImportModal({ onClose, onImported }) {
   );
 }
 
-// ── Classify merchants modal (unchanged) ─────────────────────────────────────
 
 function ClassifyModal({ categories, onClose, onDone }) {
   const backdropRef = useRef(null);
@@ -269,7 +286,6 @@ function ClassifyModal({ categories, onClose, onDone }) {
   );
 }
 
-// ── Inline edit form (for expanded rows) ─────────────────────────────────────
 
 function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   const [form, setForm] = useState(initial);
@@ -346,7 +362,6 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
   );
 }
 
-// ── Bottom-sheet add modal ────────────────────────────────────────────────────
 
 function AddModal({ categories, onClose, onSaved }) {
   const [merchant, setMerchant] = useState("");
@@ -472,20 +487,17 @@ function AddModal({ categories, onClose, onSaved }) {
   );
 }
 
-// ── Status filter pills ───────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "pending", label: "Pending" },
   { value: "confirmed", label: "Confirmed" },
-  { value: "ignored", label: "Ignored" },
 ];
 
 function needsReview(t) {
   return t.category_id == null;
 }
 
-// ── Main Transactions page ────────────────────────────────────────────────────
 
 export default function Transactions() {
   const [searchParams] = useSearchParams();
@@ -498,18 +510,20 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Filters — category pre-filled from URL param (Dashboard budget bar deep-link)
   const [filterCat, setFilterCat] = useState(searchParams.get("category_id") || "");
   const [filterStatus, setFilterStatus] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [source, setSource] = useState("");
+  const searchDebounceRef = useRef(null);
 
-  // Modals
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
   const [showClassify, setShowClassify] = useState(false);
+  const [reimburseLinkingTxn, setReimburseLinkingTxn] = useState(null);
 
-  // Row state
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [assigningId, setAssigningId] = useState(null);
@@ -518,12 +532,14 @@ export default function Transactions() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function buildParams(p, overrides = {}) {
-    const f = { filterCat, filterStatus, dateFrom, dateTo, ...overrides };
+    const f = { filterCat, filterStatus, dateFrom, dateTo, search, source, ...overrides };
     const params = { limit: PAGE_SIZE, offset: p * PAGE_SIZE };
     if (f.filterCat) params.category_id = parseInt(f.filterCat);
     if (f.filterStatus) params.status = f.filterStatus;
     if (f.dateFrom) params.date_from = f.dateFrom;
     if (f.dateTo) params.date_to = f.dateTo;
+    if (f.search) params.q = f.search;
+    if (f.source) params.source = f.source;
     return params;
   }
 
@@ -562,11 +578,19 @@ export default function Transactions() {
     fetchPage(0);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-fetch when filters change (reset to page 0)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPage(0);
-  }, [filterCat, filterStatus, dateFrom, dateTo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterCat, filterStatus, dateFrom, dateTo, source]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleSearchChange(e) {
+    const val = e.target.value;
+    setSearch(val);
+    clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      fetchPage(0, { search: val });
+    }, 250);
+  }
 
   function handleSaved(updated) {
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -615,6 +639,24 @@ export default function Transactions() {
     <>
       {!isOnline && <div className="offline-banner">📴 Offline — showing cached transactions</div>}
 
+      {showDuplicates && (
+        <DuplicatesModal
+          onClose={() => setShowDuplicates(false)}
+          onDeleted={() => fetchPage(page)}
+        />
+      )}
+
+      {reimburseLinkingTxn && (
+        <ReimbursePickerModal
+          inflowTxn={reimburseLinkingTxn}
+          onClose={() => setReimburseLinkingTxn(null)}
+          onLinked={(updated) => {
+            setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+            setReimburseLinkingTxn(null);
+          }}
+        />
+      )}
+
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}
@@ -644,6 +686,9 @@ export default function Transactions() {
         <div className="page-header">
           <h1>Transactions</h1>
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowDuplicates(true)}>
+              Duplicates
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setShowImport(true)}>
               Import CSV
             </button>
@@ -665,6 +710,23 @@ export default function Transactions() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Search */}
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <svg
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 15, height: 15, color: "var(--text-muted)", pointerEvents: "none" }}
+          >
+            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="search"
+            placeholder="Search merchant, notes, amount…"
+            value={search}
+            onChange={handleSearchChange}
+            style={{ width: "100%", paddingLeft: 32, boxSizing: "border-box" }}
+          />
         </div>
 
         {/* Status filter chips */}
@@ -691,6 +753,29 @@ export default function Transactions() {
             </button>
           ))}
         </div>
+        <div className="filter-row" style={{ marginBottom: 12 }}>
+          {[{ value: "", label: "All" }, { value: "credit", label: "Credit Card" }, { value: "venmo", label: "Venmo" }].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setSource(opt.value)}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 20,
+                fontSize: 13,
+                fontWeight: 600,
+                border: `1.5px solid ${source === opt.value ? "var(--primary)" : "var(--border)"}`,
+                background: source === opt.value ? "rgba(108,99,255,0.15)" : "transparent",
+                color: source === opt.value ? "var(--primary)" : "var(--text-muted)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                minHeight: 36,
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
         {/* Category + date filters */}
         <div className="filter-bar">
@@ -704,11 +789,11 @@ export default function Transactions() {
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </div>
 
-        {(filterCat || filterStatus || dateFrom || dateTo) && (
+        {(filterCat || filterStatus || dateFrom || dateTo || search || source) && (
           <button
             className="btn btn-ghost btn-sm"
             style={{ marginBottom: 12 }}
-            onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); }}
+            onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); setSearch(""); setSource(""); }}
           >
             Clear filters
           </button>
@@ -729,15 +814,33 @@ export default function Transactions() {
         {transactions.length > 0 && (
           <>
             <div className="txn-list card">
-              {transactions.map((t) => (
-                <div className="txn-row" key={t.id}>
+              {transactions.map((t, i) => {
+                const month = t.transaction_at?.slice(0, 7) ?? "";
+                const prevMonth = transactions[i - 1]?.transaction_at?.slice(0, 7) ?? "";
+                const showHeader = month && month !== prevMonth;
+                const headerLabel = showHeader
+                  ? new Date(month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })
+                  : null;
+                return (
+                <div key={t.id}>
+                  {showHeader && (
+                    <div style={{
+                      padding: "10px 16px 4px",
+                      fontSize: 11, fontWeight: 700, color: "var(--text-muted)",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      borderTop: i > 0 ? "1px solid var(--border)" : "none",
+                    }}>
+                      {headerLabel}
+                    </div>
+                  )}
+                <div className="txn-row">
                   <div className="txn-row-main" onClick={() => toggleRow(t.id)}>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div className="txn-merchant">
                         {t.merchant_raw || "Untitled"}
                         {t.notes?.startsWith("venmo:") && (
                           <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)", marginLeft: 6 }}>
-                            · {t.direction === "inflow" ? "From" : "To"} {t.notes.slice(6)}
+                            · {venmoLabel(t.notes, t.direction)}
                           </span>
                         )}
                       </div>
@@ -756,9 +859,25 @@ export default function Transactions() {
                         )}
                       </div>
                     </div>
-                    <span className={`txn-amount ${t.direction === "inflow" ? "text-green" : "text-red"}`}>
-                      {fmtAmt(t)}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
+                      <span className={`txn-amount ${t.direction === "inflow" ? "text-green" : "text-red"}`}>
+                        {fmtAmt(t)}
+                      </span>
+                      {t.direction === "inflow" && t.reimburses_id && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: "var(--primary)",
+                          border: "1px solid var(--primary)", borderRadius: 4,
+                          padding: "1px 5px", lineHeight: 1.4,
+                        }}>
+                          Reimb
+                        </span>
+                      )}
+                      {t.direction === "outflow" && t.reimbursed_by_id && (
+                        <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>
+                          Net ${(parseFloat(t.amount) - parseFloat(t.reimbursed_by_amount)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {expandedId === t.id && editingId !== t.id && (
@@ -802,9 +921,31 @@ export default function Transactions() {
                             <dt className="txn-meta-key">Type</dt>
                             <dd className="txn-meta-val">
                               {t.notes?.startsWith("venmo")
-                                ? `Venmo · ${t.direction === "inflow" ? "Received from" : "Sent to"} ${t.notes.slice(6)}`
+                                ? `Venmo · ${venmoLabel(t.notes, t.direction, true)}`
                                 : t.direction === "inflow" ? "Credit" : "Debit"}
                             </dd>
+                            {t.reimburses_id && (
+                              <>
+                                <dt className="txn-meta-key">Reimburses</dt>
+                                <dd className="txn-meta-val">
+                                  {t.reimburses_merchant || "expense"} · -${parseFloat(t.reimburses_amount).toFixed(2)}
+                                  {t.reimburses_date ? ` (${fmtDate(t.reimburses_date)})` : ""}
+                                </dd>
+                              </>
+                            )}
+                            {t.reimbursed_by_id && (
+                              <>
+                                <dt className="txn-meta-key">Reimbursed by</dt>
+                                <dd className="txn-meta-val" style={{ color: "var(--green)" }}>
+                                  +${parseFloat(t.reimbursed_by_amount).toFixed(2)}
+                                  {t.reimbursed_by_merchant ? ` · ${t.reimbursed_by_merchant}` : ""}
+                                </dd>
+                                <dt className="txn-meta-key">Net cost</dt>
+                                <dd className="txn-meta-val" style={{ color: "var(--green)", fontWeight: 600 }}>
+                                  ${(parseFloat(t.amount) - parseFloat(t.reimbursed_by_amount)).toFixed(2)}
+                                </dd>
+                              </>
+                            )}
                           </dl>
                           <div className="txn-expanded-actions">
                             <button
@@ -813,6 +954,14 @@ export default function Transactions() {
                             >
                               Edit
                             </button>
+                            {t.direction === "inflow" && (
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={(e) => { e.stopPropagation(); setReimburseLinkingTxn(t); }}
+                              >
+                                {t.reimburses_id ? "Change Link" : "Link Reimbursement"}
+                              </button>
+                            )}
                             <button
                               className="btn btn-sm"
                               style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent" }}
@@ -841,7 +990,9 @@ export default function Transactions() {
                     </div>
                   )}
                 </div>
-              ))}
+                </div>
+                );
+              })}
             </div>
 
             <div className="pagination">

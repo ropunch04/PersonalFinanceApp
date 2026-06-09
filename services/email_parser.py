@@ -32,13 +32,16 @@ _CREDIT_MERCHANT = re.compile(r"([A-Z][A-Z\s\*\-0-9]+)\n.*Card\.\.\.", re.IGNORE
 _CREDIT_DATE = re.compile(r"(\w+\.\s*\d{1,2},?\s*\d{4})")
 
 _VENMO_PAID = re.compile(r"paid you \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
-_VENMO_CHARGE = re.compile(r"you paid (?:.+?) \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
-# Subject-line name extractors (reliable — not contaminated by HTML table layout)
+_VENMO_YOU_PAID = re.compile(r"you paid (?:.+?) \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
+_VENMO_CHARGED_YOU = re.compile(r"charged you \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
+
 _VENMO_SUBJ_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE)
 _VENMO_SUBJ_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
-# Body fallbacks (used when subject doesn't match)
+_VENMO_SUBJ_CHARGER = re.compile(r"^(.+?) charged you", re.IGNORECASE)
+
 _VENMO_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE | re.MULTILINE)
 _VENMO_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
+_VENMO_CHARGER = re.compile(r"^(.+?) charged you", re.IGNORECASE | re.MULTILINE)
 
 
 def _source_hash(provider: str, message_id: str) -> str:
@@ -150,25 +153,38 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
     text = _get_text(msg)
 
     paid_m = _VENMO_PAID.search(text)
-    charge_m = _VENMO_CHARGE.search(text)
+    you_paid_m = _VENMO_YOU_PAID.search(text)
+    charged_you_m = _VENMO_CHARGED_YOU.search(text)
 
     if paid_m:
         amount = float(paid_m.group(1).replace(",", ""))
         direction = "inflow"
+        txn_type = "payment"
         subj_m = _VENMO_SUBJ_FROM.search(subject)
         if subj_m:
             merchant_raw = subj_m.group(1).strip()
         else:
             body_m = _VENMO_FROM.search(text)
             merchant_raw = body_m.group(1).strip() if body_m else "Venmo"
-    elif charge_m:
-        amount = float(charge_m.group(1).replace(",", ""))
+    elif you_paid_m:
+        amount = float(you_paid_m.group(1).replace(",", ""))
         direction = "outflow"
+        txn_type = "payment"
         subj_m = _VENMO_SUBJ_TO.search(subject)
         if subj_m:
             merchant_raw = subj_m.group(1).strip()
         else:
             body_m = _VENMO_TO.search(text)
+            merchant_raw = body_m.group(1).strip() if body_m else "Venmo"
+    elif charged_you_m:
+        amount = float(charged_you_m.group(1).replace(",", ""))
+        direction = "outflow"
+        txn_type = "charge"
+        subj_m = _VENMO_SUBJ_CHARGER.search(subject)
+        if subj_m:
+            merchant_raw = subj_m.group(1).strip()
+        else:
+            body_m = _VENMO_CHARGER.search(text)
             merchant_raw = body_m.group(1).strip() if body_m else "Venmo"
     else:
         return None
@@ -181,7 +197,7 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
         "category_id": _get_category_id(conn, "Venmo") if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("venmo_email", message_id),
-        "notes": f"venmo:{person}",
+        "notes": f"venmo:{txn_type}:{person}",
     }
 
 

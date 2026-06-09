@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -130,6 +131,12 @@ def delete_user_route(user_id):
         return _err("Cannot delete your own account", 400)
 
     delete_user(user_id)
+
+    try:
+        os.remove(get_db_path(user_id))
+    except FileNotFoundError:
+        pass
+
     return _ok({"deleted": True})
 
 

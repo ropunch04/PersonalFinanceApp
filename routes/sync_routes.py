@@ -49,6 +49,19 @@ def delete_gmail():
     return _ok({"gmail_configured": False})
 
 
+@bp.get("/sync/status")
+@require_auth
+def sync_status():
+    conn = get_user_db(g.current_user["user_id"])
+    row = conn.execute(
+        "SELECT gmail_address, last_synced_at FROM profile WHERE id = 1"
+    ).fetchone()
+    return _ok({
+        "credentials_configured": bool(row and row["gmail_address"]),
+        "last_synced_at": row["last_synced_at"] if row else None,
+    })
+
+
 @bp.post("/sync")
 @require_auth
 def trigger_sync():

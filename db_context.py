@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     notes          TEXT,
     transaction_at TEXT    NOT NULL,
     created_at     TEXT    NOT NULL,
-    source_hash    TEXT    UNIQUE
+    source_hash    TEXT    UNIQUE,
+    reimburses_id  INTEGER REFERENCES transactions(id)
 );
 
 CREATE TABLE IF NOT EXISTS profile (
@@ -60,6 +61,7 @@ def get_db_path(user_id: int) -> str:
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
     if "user_db" not in g:
+        init_user_db(user_id)
         conn = sqlite3.connect(get_db_path(user_id))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")

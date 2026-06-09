@@ -106,8 +106,12 @@ def parse_venmo_csv(stream, conn) -> tuple[list[dict], list[dict]]:
 
             from_name = (row.get("From") or row.get(" From") or "").strip()
             to_name = (row.get("To") or row.get(" To") or "").strip()
-            person = from_name if direction == "inflow" else to_name
-            notes = f"venmo:{person}" if person else "venmo"
+            venmo_type = "charge" if txn_type == "Charge" else "payment"
+            if venmo_type == "charge":
+                person = from_name if direction == "outflow" else to_name
+            else:
+                person = from_name if direction == "inflow" else to_name
+            notes = f"venmo:{venmo_type}:{person}" if person else "venmo"
 
             transactions.append(
                 {
