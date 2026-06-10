@@ -436,7 +436,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   font-family: inherit;
   outline: none;
   appearance: none;
