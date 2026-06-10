@@ -1,0 +1,20 @@
+[Unit]
+Description=Cloudflare Tunnel (finance-app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=rohitpras
+# Replace finance-app with the tunnel name you used in: cloudflared tunnel create <name>
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run finance-app
+
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared
+
+[Install]
+WantedBy=multi-user.target

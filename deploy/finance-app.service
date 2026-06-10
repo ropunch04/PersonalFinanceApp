@@ -1,0 +1,29 @@
+[Unit]
+Description=Personal Finance App (Gunicorn)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+User=rohitpras
+WorkingDirectory=/home/rohitpras/PersonalFinanceApp
+
+EnvironmentFile=/home/rohitpras/PersonalFinanceApp/.env
+ExecStart=/home/rohitpras/PersonalFinanceApp/venv/bin/gunicorn \
+    --config gunicorn.conf.py \
+    app:app
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=finance-app
+
+# Keep the process from writing outside its own directory
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
