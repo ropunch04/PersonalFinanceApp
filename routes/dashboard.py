@@ -1,3 +1,4 @@
+import calendar
 from datetime import date, timedelta
 
 from flask import Blueprint, g, request
@@ -9,13 +10,63 @@ from services.budget_service import get_budget_summary
 bp = Blueprint("dashboard", __name__, url_prefix="/api")
 
 
+def _parse_include_ids(raw: str) -> list[int]:
+    if not raw:
+        return []
+    try:
+        return [int(x) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        return []
+
+
+def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
+    ids = pinned_ids or []
+    if ids:
+        ph = ",".join("?" * len(ids))
+        w_where = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
+        w_join  = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
+    else:
+        w_where = "transaction_at BETWEEN ? AND ?"
+        w_join  = "t.transaction_at BETWEEN ? AND ?"
+    p = [start_str, end_str] + ids
+
+    row = conn.execute(f"""
+        SELECT
+            COALESCE(SUM(CASE WHEN direction='outflow' THEN amount ELSE 0 END),0) AS spent,
+            COALESCE(SUM(CASE WHEN direction='inflow'  THEN amount ELSE 0 END),0) AS income
+        FROM transactions WHERE {w_where}
+    """, p).fetchone()
+    spent  = row["spent"]
+    income = row["income"]
+    net    = income - spent
+
+    top = conn.execute(f"""
+        SELECT c.name AS category_name,
+               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS cat_spent
+        FROM categories c
+        LEFT JOIN transactions t ON t.category_id = c.id AND {w_join}
+        GROUP BY c.id, c.name
+        ORDER BY cat_spent DESC LIMIT 1
+    """, p).fetchone()
+    top_category = top["category_name"] if top and top["cat_spent"] > 0 else None
+
+    return {"spent": spent, "income": income, "net": net, "top_category": top_category}
+
+
+def _delta_pct(current, previous):
+    if not previous or previous == 0:
+        return None
+    return round((current - previous) / abs(previous) * 100, 1)
+
+
 @bp.get("/dashboard")
 @require_auth
 def dashboard():
     conn = get_user_db(g.current_user["user_id"])
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    return {"data": get_budget_summary(conn, start_date, end_date), "error": None}
+    pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
+    return {"data": get_budget_summary(conn, start_date, end_date, pinned_ids), "error": None}
 
 
 @bp.get("/dashboard/trend")
@@ -28,6 +79,7 @@ def dashboard_trend():
     end_str   = request.args.get("end_date")   or today.isoformat()
     start = date.fromisoformat(start_str)
     end   = date.fromisoformat(end_str)
+    pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
 
     span_days = (end - start).days
     granularity = request.args.get("granularity")
@@ -46,16 +98,24 @@ def dashboard_trend():
     else:
         group_expr = "strftime('%Y-%m', transaction_at)"
 
+    ids = pinned_ids or []
+    if ids:
+        ph = ",".join("?" * len(ids))
+        w = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
+    else:
+        w = "transaction_at BETWEEN ? AND ?"
+    p = [start_str, end_str] + ids
+
     rows = conn.execute(f"""
         SELECT
             {group_expr} AS bucket,
             SUM(CASE WHEN direction = 'outflow' THEN amount ELSE 0 END) AS spent,
             SUM(CASE WHEN direction = 'inflow'  THEN amount ELSE 0 END) AS income
         FROM transactions
-        WHERE transaction_at BETWEEN ? AND ?
+        WHERE {w}
         GROUP BY bucket
         ORDER BY bucket ASC
-    """, (start_str, end_str)).fetchall()
+    """, p).fetchall()
 
     data_map = {r["bucket"]: {"spent": r["spent"], "income": r["income"]} for r in rows}
     series = []
@@ -80,7 +140,6 @@ def dashboard_trend():
             key = cursor.strftime("%Y-%m")
             vals = data_map.get(key, {"spent": 0, "income": 0})
             series.append({"date": cursor.isoformat(), "spent": vals["spent"], "income": vals["income"]})
-
             if cursor.month == 12:
                 cursor = cursor.replace(year=cursor.year + 1, month=1)
             else:
@@ -96,21 +155,38 @@ def dashboard_merchants():
     today = date.today()
     start_str = request.args.get("start_date") or today.replace(day=1).isoformat()
     end_str   = request.args.get("end_date")   or today.isoformat()
+    pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
 
-    top_merchants = conn.execute("""
+    ids = pinned_ids or []
+    if ids:
+        ph = ",".join("?" * len(ids))
+        w = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
+        w_plain = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
+    else:
+        w = "t.transaction_at BETWEEN ? AND ?"
+        w_plain = "transaction_at BETWEEN ? AND ?"
+    p = [start_str, end_str] + ids
+
+    top_merchants = conn.execute(f"""
         SELECT
-            merchant_raw,
-            SUM(amount)  AS total_spent,
-            COUNT(*)     AS transaction_count,
-            AVG(amount)  AS average_amount
-        FROM transactions
-        WHERE direction = 'outflow'
-          AND transaction_at BETWEEN ? AND ?
-          AND merchant_raw IS NOT NULL
-        GROUP BY merchant_raw
-        ORDER BY total_spent DESC
+            t.merchant_raw,
+            SUM(t.amount) - COALESCE(SUM(reimb.total_reimb), 0) AS net_spent,
+            COUNT(t.id)   AS transaction_count,
+            AVG(t.amount) AS average_amount
+        FROM transactions t
+        LEFT JOIN (
+            SELECT reimburses_id, SUM(amount) AS total_reimb
+            FROM transactions
+            WHERE direction = 'inflow' AND reimburses_id IS NOT NULL
+            GROUP BY reimburses_id
+        ) reimb ON reimb.reimburses_id = t.id
+        WHERE t.direction = 'outflow'
+          AND {w}
+          AND t.merchant_raw IS NOT NULL
+        GROUP BY t.merchant_raw
+        ORDER BY net_spent DESC
         LIMIT 8
-    """, (start_str, end_str)).fetchall()
+    """, p).fetchall()
 
     merchant_list = []
     for m in top_merchants:
@@ -124,70 +200,46 @@ def dashboard_merchants():
         """, (m["merchant_raw"], start_str, end_str)).fetchall()
         merchant_list.append({
             "merchant_raw": m["merchant_raw"],
-            "total_spent": m["total_spent"],
+            "net_spent": m["net_spent"],
             "transaction_count": m["transaction_count"],
             "average_amount": m["average_amount"],
             "transactions": [{"amount": t["amount"], "transaction_at": t["transaction_at"]} for t in txns],
         })
 
-    largest = conn.execute("""
-        SELECT merchant_raw, amount, transaction_at
-        FROM transactions
-        WHERE direction = 'outflow'
-          AND transaction_at BETWEEN ? AND ?
-          AND merchant_raw IS NOT NULL
-        ORDER BY amount DESC
+    largest = conn.execute(f"""
+        SELECT t.merchant_raw,
+               t.amount - COALESCE(reimb.total_reimb, 0) AS net_amount,
+               t.transaction_at
+        FROM transactions t
+        LEFT JOIN (
+            SELECT reimburses_id, SUM(amount) AS total_reimb
+            FROM transactions
+            WHERE direction = 'inflow' AND reimburses_id IS NOT NULL
+            GROUP BY reimburses_id
+        ) reimb ON reimb.reimburses_id = t.id
+        WHERE t.direction = 'outflow'
+          AND {w}
+          AND t.merchant_raw IS NOT NULL
+        ORDER BY net_amount DESC
         LIMIT 1
-    """, (start_str, end_str)).fetchone()
+    """, p).fetchone()
 
-    repeat_merchants = conn.execute("""
+    repeat_merchants = conn.execute(f"""
         SELECT merchant_raw, COUNT(DISTINCT strftime('%Y-%m', transaction_at)) AS months_seen
         FROM transactions
         WHERE direction = 'outflow'
-          AND transaction_at BETWEEN ? AND ?
+          AND {w_plain}
           AND merchant_raw IS NOT NULL
         GROUP BY merchant_raw
         HAVING months_seen > 1
         ORDER BY months_seen DESC
-    """, (start_str, end_str)).fetchall()
+    """, p).fetchall()
 
     return {"data": {
         "top_merchants": merchant_list,
         "largest_transaction": dict(largest) if largest else None,
         "repeat_merchants": [{"merchant_raw": r["merchant_raw"], "months_seen": r["months_seen"]} for r in repeat_merchants],
     }, "error": None}
-
-
-def _period_totals(conn, start_str, end_str):
-    """Return spent, income, net, and top_category for a date range."""
-    row = conn.execute("""
-        SELECT
-            COALESCE(SUM(CASE WHEN direction='outflow' THEN amount ELSE 0 END),0) AS spent,
-            COALESCE(SUM(CASE WHEN direction='inflow'  THEN amount ELSE 0 END),0) AS income
-        FROM transactions WHERE transaction_at BETWEEN ? AND ?
-    """, (start_str, end_str)).fetchone()
-    spent  = row["spent"]
-    income = row["income"]
-    net    = income - spent
-
-    top = conn.execute("""
-        SELECT c.name AS category_name,
-               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS cat_spent
-        FROM categories c
-        LEFT JOIN transactions t ON t.category_id = c.id
-            AND t.transaction_at BETWEEN ? AND ?
-        GROUP BY c.id, c.name
-        ORDER BY cat_spent DESC LIMIT 1
-    """, (start_str, end_str)).fetchone()
-    top_category = top["category_name"] if top and top["cat_spent"] > 0 else None
-
-    return {"spent": spent, "income": income, "net": net, "top_category": top_category}
-
-
-def _delta_pct(current, previous):
-    if not previous or previous == 0:
-        return None
-    return round((current - previous) / abs(previous) * 100, 1)
 
 
 @bp.get("/dashboard/comparison")
@@ -200,6 +252,7 @@ def dashboard_comparison():
     end_str   = request.args.get("end_date")   or today.isoformat()
     start = date.fromisoformat(start_str)
     end   = date.fromisoformat(end_str)
+    pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
 
     span = (end - start).days + 1
     if start.day == 1:
@@ -209,17 +262,25 @@ def dashboard_comparison():
         prev_start = start - timedelta(days=span)
         prev_end   = start - timedelta(days=1)
 
-    current  = _period_totals(conn, start_str, end_str)
+    current  = _period_totals(conn, start_str, end_str, pinned_ids)
     previous = _period_totals(conn, prev_start.isoformat(), prev_end.isoformat())
     has_prev = previous["spent"] > 0 or previous["income"] > 0
 
-    cur_cats = conn.execute("""
+    ids = pinned_ids or []
+    if ids:
+        ph = ",".join("?" * len(ids))
+        cur_join = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
+    else:
+        cur_join = "t.transaction_at BETWEEN ? AND ?"
+    cur_p = [start_str, end_str] + ids
+
+    cur_cats = conn.execute(f"""
         SELECT c.id, c.name,
                COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS spent
         FROM categories c
-        LEFT JOIN transactions t ON t.category_id=c.id AND t.transaction_at BETWEEN ? AND ?
+        LEFT JOIN transactions t ON t.category_id=c.id AND {cur_join}
         GROUP BY c.id, c.name
-    """, (start_str, end_str)).fetchall()
+    """, cur_p).fetchall()
     prev_cats = conn.execute("""
         SELECT c.id,
                COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS spent
@@ -248,7 +309,6 @@ def dashboard_comparison():
     velocity = None
     range_days = (end - start).days
     if end >= today and range_days < 60 and start.day == 1:
-        import calendar
         days_in_month = calendar.monthrange(start.year, start.month)[1]
         days_elapsed  = max((today - start).days, 1)
         daily_rate    = current["spent"] / days_elapsed

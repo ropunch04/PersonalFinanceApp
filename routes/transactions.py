@@ -20,9 +20,8 @@ _TXN_SELECT = """
            rt.merchant_raw    AS reimburses_merchant,
            rt.amount          AS reimburses_amount,
            rt.transaction_at  AS reimburses_date,
-           (SELECT ri.id          FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_id,
-           (SELECT ri.amount      FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_amount,
-           (SELECT ri.merchant_raw FROM transactions ri WHERE ri.reimburses_id = t.id LIMIT 1) AS reimbursed_by_merchant
+           (SELECT COUNT(*)                    FROM transactions ri WHERE ri.reimburses_id = t.id) AS reimbursed_by_count,
+           (SELECT COALESCE(SUM(ri.amount), 0) FROM transactions ri WHERE ri.reimburses_id = t.id) AS reimbursed_by_total
     FROM transactions t
     LEFT JOIN categories c  ON t.category_id = c.id
     LEFT JOIN transactions rt ON rt.id = t.reimburses_id

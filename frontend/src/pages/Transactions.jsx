@@ -872,11 +872,14 @@ export default function Transactions() {
                           Reimb
                         </span>
                       )}
-                      {t.direction === "outflow" && t.reimbursed_by_id && (
-                        <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>
-                          Net ${(parseFloat(t.amount) - parseFloat(t.reimbursed_by_amount)).toFixed(2)}
-                        </span>
-                      )}
+                      {t.direction === "outflow" && t.reimbursed_by_count > 0 && (() => {
+                        const net = parseFloat(t.reimbursed_by_total) - parseFloat(t.amount);
+                        return (
+                          <span style={{ fontSize: 11, color: net >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+                            Net {net >= 0 ? "+" : "-"}${Math.abs(net).toFixed(2)}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -933,19 +936,22 @@ export default function Transactions() {
                                 </dd>
                               </>
                             )}
-                            {t.reimbursed_by_id && (
-                              <>
-                                <dt className="txn-meta-key">Reimbursed by</dt>
-                                <dd className="txn-meta-val" style={{ color: "var(--green)" }}>
-                                  +${parseFloat(t.reimbursed_by_amount).toFixed(2)}
-                                  {t.reimbursed_by_merchant ? ` · ${t.reimbursed_by_merchant}` : ""}
-                                </dd>
-                                <dt className="txn-meta-key">Net cost</dt>
-                                <dd className="txn-meta-val" style={{ color: "var(--green)", fontWeight: 600 }}>
-                                  ${(parseFloat(t.amount) - parseFloat(t.reimbursed_by_amount)).toFixed(2)}
-                                </dd>
-                              </>
-                            )}
+                            {t.reimbursed_by_count > 0 && (() => {
+                              const net = parseFloat(t.reimbursed_by_total) - parseFloat(t.amount);
+                              return (
+                                <>
+                                  <dt className="txn-meta-key">Reimbursed by</dt>
+                                  <dd className="txn-meta-val" style={{ color: "var(--green)" }}>
+                                    +${parseFloat(t.reimbursed_by_total).toFixed(2)}
+                                    {t.reimbursed_by_count > 1 ? ` · ${t.reimbursed_by_count} payments` : ""}
+                                  </dd>
+                                  <dt className="txn-meta-key">Net cost</dt>
+                                  <dd className="txn-meta-val" style={{ color: net >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+                                    {net >= 0 ? "+" : "-"}${Math.abs(net).toFixed(2)}
+                                  </dd>
+                                </>
+                              );
+                            })()}
                           </dl>
                           <div className="txn-expanded-actions">
                             <button

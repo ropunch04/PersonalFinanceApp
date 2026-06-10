@@ -9,6 +9,7 @@ import CategoryDonut from "../components/CategoryDonut";
 import SpendingTrendChart from "../components/SpendingTrendChart";
 import MerchantInsights from "../components/MerchantInsights";
 import ComparisonCard from "../components/ComparisonCard";
+import PinPickerModal from "../components/PinPickerModal";
 
 function fmt(n) {
   return new Intl.NumberFormat("en-US", {
@@ -88,13 +89,24 @@ export default function Dashboard({ onQueueChange }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [showPinPicker, setShowPinPicker] = useState(false);
   const navigate = useNavigate();
   const { isOnline } = useOnline();
-  const { range, setRange, dateParams } = useDashboardFilters();
+  const {
+    range, setRange,
+    customStart, setCustomStart,
+    customEnd, setCustomEnd,
+    pinnedIds, togglePin, clearPins,
+    dateParams,
+  } = useDashboardFilters();
+
+  const allParams = pinnedIds.length
+    ? { ...dateParams, include_ids: pinnedIds.join(",") }
+    : dateParams;
 
   useEffect(() => {
-    load(dateParams);
-  }, [dateParams]); // eslint-disable-line react-hooks/exhaustive-deps
+    load(allParams);
+  }, [dateParams, pinnedIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.syncStatus().then(setSyncStatus).catch(() => {});
@@ -129,7 +141,7 @@ export default function Dashboard({ onQueueChange }) {
       const result = await api.syncNow();
       const status = await api.syncStatus();
       setSyncStatus(status);
-      if (result?.new_transactions > 0 || result?.imported > 0) load();
+      if (result?.new_transactions > 0 || result?.imported > 0) load(allParams);
     } catch {
     } finally {
       setRefreshing(false);
@@ -183,7 +195,6 @@ export default function Dashboard({ onQueueChange }) {
           )}
         </div>
 
-        {/* Time range pills */}
         <div className="range-pills">
           {RANGES.map((r) => (
             <button
@@ -194,9 +205,41 @@ export default function Dashboard({ onQueueChange }) {
               {r.label}
             </button>
           ))}
+          <button
+            className={`range-pill${pinnedIds.length > 0 ? " active" : ""}`}
+            style={pinnedIds.length > 0 ? { background: "var(--primary)", borderColor: "var(--primary)" } : {}}
+            onClick={() => setShowPinPicker(true)}
+          >
+            {pinnedIds.length > 0 ? `+${pinnedIds.length} pinned` : "Pin"}
+          </button>
         </div>
 
-        {/* Money summary */}
+        {range === "custom" && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              style={{
+                flex: 1, padding: "7px 10px", borderRadius: 8,
+                border: "1px solid var(--border)", background: "var(--surface-raised)",
+                color: "var(--text)", fontSize: 13,
+              }}
+            />
+            <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>to</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              style={{
+                flex: 1, padding: "7px 10px", borderRadius: 8,
+                border: "1px solid var(--border)", background: "var(--surface-raised)",
+                color: "var(--text)", fontSize: 13,
+              }}
+            />
+          </div>
+        )}
+
         <div className="summary-grid" style={{ marginBottom: 20 }}>
           <div className="stat-tile">
             <span className="stat-value text-red">{fmt(spent)}</span>
@@ -218,13 +261,10 @@ export default function Dashboard({ onQueueChange }) {
           )}
         </div>
 
-        {/* Period comparison */}
-        <ComparisonCard dateParams={dateParams} />
+        <ComparisonCard dateParams={allParams} />
 
-        {/* Spending trend chart */}
-        <SpendingTrendChart dateParams={dateParams} monthlyIncome={income} />
+        <SpendingTrendChart dateParams={allParams} monthlyIncome={income} />
 
-        {/* Category donut + breakdown */}
         <CategoryDonut
           categories={by_category}
           selectedId={selectedCategoryId}
@@ -235,9 +275,18 @@ export default function Dashboard({ onQueueChange }) {
           selectedId={selectedCategoryId}
         />
 
-        {/* Merchant insights */}
-        <MerchantInsights dateParams={dateParams} />
+        <MerchantInsights dateParams={allParams} />
       </div>
+
+      {showPinPicker && (
+        <PinPickerModal
+          pinnedIds={pinnedIds}
+          togglePin={togglePin}
+          clearPins={clearPins}
+          dateParams={dateParams}
+          onClose={() => setShowPinPicker(false)}
+        />
+      )}
     </>
   );
 }

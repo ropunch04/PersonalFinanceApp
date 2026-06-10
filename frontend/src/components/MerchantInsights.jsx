@@ -88,7 +88,6 @@ export default function MerchantInsights({ dateParams }) {
   return (
     <>
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
-        {/* Top Merchants */}
         {top_merchants.length > 0 && (
           <>
             <p className="section-label" style={{ padding: "14px 16px 10px", margin: 0 }}>
@@ -117,14 +116,13 @@ export default function MerchantInsights({ dateParams }) {
                   </div>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#EF4444", flexShrink: 0 }}>
-                  {fmt(m.total_spent)}
+                  {fmt(m.net_spent)}
                 </div>
               </div>
             ))}
           </>
         )}
 
-        {/* Largest Transaction */}
         {largest_transaction && (
           <>
             <p className="section-label" style={{ padding: "14px 16px 10px", margin: 0 }}>
@@ -145,7 +143,7 @@ export default function MerchantInsights({ dateParams }) {
                 </div>
               </div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#EF4444" }}>
-                {fmt(largest_transaction.amount)}
+                {fmt(largest_transaction.net_amount ?? largest_transaction.amount)}
               </div>
             </div>
           </>
