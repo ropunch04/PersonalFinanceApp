@@ -407,7 +407,6 @@ function AddModal({ categories, onClose, onSaved }) {
 
         <form onSubmit={save}>
           <div className="form-stack">
-            {/* Direction toggle */}
             <div className="field">
               <label className="field-label">Direction</label>
               <div className="segmented">
@@ -512,10 +511,11 @@ export default function Transactions() {
 
   const [filterCat, setFilterCat] = useState(searchParams.get("category_id") || "");
   const [filterStatus, setFilterStatus] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || "");
+  const [dateTo, setDateTo]     = useState(searchParams.get("date_to")   || "");
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("");
+  const [sort, setSort] = useState("date_desc");
   const searchDebounceRef = useRef(null);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -529,10 +529,22 @@ export default function Transactions() {
   const [assigningId, setAssigningId] = useState(null);
   const [unclassifiedCount, setUnclassifiedCount] = useState(0);
 
+  const [pinnedIds, setPinnedIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pinned_txn_ids") ?? "[]"); } catch { return []; }
+  });
+
+  function togglePin(id) {
+    setPinnedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      localStorage.setItem("pinned_txn_ids", JSON.stringify(next));
+      return next;
+    });
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function buildParams(p, overrides = {}) {
-    const f = { filterCat, filterStatus, dateFrom, dateTo, search, source, ...overrides };
+    const f = { filterCat, filterStatus, dateFrom, dateTo, search, source, sort, ...overrides };
     const params = { limit: PAGE_SIZE, offset: p * PAGE_SIZE };
     if (f.filterCat) params.category_id = parseInt(f.filterCat);
     if (f.filterStatus) params.status = f.filterStatus;
@@ -540,6 +552,8 @@ export default function Transactions() {
     if (f.dateTo) params.date_to = f.dateTo;
     if (f.search) params.q = f.search;
     if (f.source) params.source = f.source;
+    if (f.sort && f.sort !== "date_desc") params.sort = f.sort;
+    if (pinnedIds.length && (f.dateFrom || f.dateTo)) params.include_ids = pinnedIds.join(",");
     return params;
   }
 
@@ -581,7 +595,7 @@ export default function Transactions() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPage(0);
-  }, [filterCat, filterStatus, dateFrom, dateTo, source]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterCat, filterStatus, dateFrom, dateTo, source, sort, pinnedIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchChange(e) {
     const val = e.target.value;
@@ -712,7 +726,6 @@ export default function Transactions() {
           </div>
         </div>
 
-        {/* Search */}
         <div style={{ position: "relative", marginBottom: 12 }}>
           <svg
             viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -729,7 +742,6 @@ export default function Transactions() {
           />
         </div>
 
-        {/* Status filter chips */}
         <div className="filter-row" style={{ marginBottom: 12 }}>
           {STATUS_OPTIONS.map((opt) => (
             <button
@@ -777,7 +789,6 @@ export default function Transactions() {
           ))}
         </div>
 
-        {/* Category + date filters */}
         <div className="filter-bar">
           <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
             <option value="">All categories</option>
@@ -787,17 +798,40 @@ export default function Transactions() {
           </select>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <select value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="date_desc">Newest first</option>
+            <option value="date_asc">Oldest first</option>
+            <option value="amount_desc">Amount (high→low)</option>
+            <option value="amount_asc">Amount (low→high)</option>
+            <option value="merchant_asc">Merchant (A–Z)</option>
+          </select>
         </div>
 
-        {(filterCat || filterStatus || dateFrom || dateTo || search || source) && (
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ marginBottom: 12 }}
-            onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); setSearch(""); setSource(""); }}
-          >
-            Clear filters
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {(filterCat || filterStatus || dateFrom || dateTo || search || source || sort !== "date_desc") && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); setSearch(""); setSource(""); setSort("date_desc"); }}
+            >
+              Clear filters
+            </button>
+          )}
+          {pinnedIds.length > 0 && (dateFrom || dateTo) && (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+              background: "rgba(108,99,255,0.15)", border: "1.5px solid var(--primary)",
+              color: "var(--primary)",
+            }}>
+              {pinnedIds.length} pinned included
+              <button
+                onClick={() => { localStorage.setItem("pinned_txn_ids", "[]"); setPinnedIds([]); }}
+                style={{ background: "none", border: "none", color: "var(--primary)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}
+                title="Clear pins"
+              >×</button>
+            </div>
+          )}
+        </div>
 
         {error && <div className="msg msg-error">{error}</div>}
 
@@ -872,6 +906,15 @@ export default function Transactions() {
                           Reimb
                         </span>
                       )}
+                      {pinnedIds.includes(t.id) && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: "var(--text-muted)",
+                          border: "1px solid var(--border)", borderRadius: 4,
+                          padding: "1px 5px", lineHeight: 1.4,
+                        }}>
+                          Pinned
+                        </span>
+                      )}
                       {t.direction === "outflow" && t.reimbursed_by_count > 0 && (() => {
                         const net = parseFloat(t.reimbursed_by_total) - parseFloat(t.amount);
                         return (
@@ -905,6 +948,13 @@ export default function Transactions() {
                               onClick={() => { setEditingId(t.id); setExpandedId(null); }}
                             >
                               Edit details
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={pinnedIds.includes(t.id) ? { color: "var(--primary)", borderColor: "var(--primary)" } : {}}
+                              onClick={(e) => { e.stopPropagation(); togglePin(t.id); }}
+                            >
+                              {pinnedIds.includes(t.id) ? "Unpin" : "Pin"}
                             </button>
                             <button
                               className="btn btn-sm"
@@ -960,6 +1010,13 @@ export default function Transactions() {
                             >
                               Edit
                             </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={pinnedIds.includes(t.id) ? { color: "var(--primary)", borderColor: "var(--primary)" } : {}}
+                              onClick={(e) => { e.stopPropagation(); togglePin(t.id); }}
+                            >
+                              {pinnedIds.includes(t.id) ? "Unpin" : "Pin"}
+                            </button>
                             {t.direction === "inflow" && (
                               <button
                                 className="btn btn-ghost btn-sm"
@@ -1010,7 +1067,6 @@ export default function Transactions() {
         )}
       </div>
 
-      {/* FAB — add transaction */}
       <button className="fab" onClick={() => setShowAdd(true)} aria-label="Add transaction" title="Add transaction">
         +
       </button>

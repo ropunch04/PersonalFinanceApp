@@ -15,7 +15,7 @@ function barColor(ratio) {
   return "#22C55E";
 }
 
-export default function CategoryBreakdown({ categories, selectedId }) {
+export default function CategoryBreakdown({ categories, selectedId, dateParams }) {
   const [showEmpty, setShowEmpty] = useState(false);
   const navigate = useNavigate();
 
@@ -48,7 +48,13 @@ export default function CategoryBreakdown({ categories, selectedId }) {
               borderTop: "1px solid var(--border)",
               cursor: cat.category_id ? "pointer" : "default",
             }}
-            onClick={() => cat.category_id && navigate(`/transactions?category_id=${cat.category_id}`)}
+            onClick={() => {
+              if (!cat.category_id) return;
+              const p = new URLSearchParams({ category_id: cat.category_id });
+              if (dateParams?.start_date) p.set("date_from", dateParams.start_date);
+              if (dateParams?.end_date)   p.set("date_to",   dateParams.end_date);
+              navigate(`/transactions?${p.toString()}`);
+            }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 500, color: "#F1F5F9" }}>

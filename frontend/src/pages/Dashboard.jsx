@@ -158,9 +158,10 @@ export default function Dashboard({ onQueueChange }) {
   );
 
   const { pending_count, by_category } = data;
-  const spent = data.total_spent ?? 0;
-  const income = data.monthly_income ?? 0;
-  const net = income - spent;
+  const spent      = data.total_spent   ?? 0;
+  const totalIn    = data.total_income  ?? 0;
+  const monthlyIncome = data.monthly_income ?? 0;
+  const net = totalIn - spent;
 
   return (
     <>
@@ -245,25 +246,21 @@ export default function Dashboard({ onQueueChange }) {
             <span className="stat-value text-red">{fmt(spent)}</span>
             <span className="stat-label">Money Out</span>
           </div>
-          {income > 0 && (
-            <div className="stat-tile">
-              <span className="stat-value text-green">{fmt(income)}</span>
-              <span className="stat-label">Money In</span>
-            </div>
-          )}
-          {income > 0 && (
-            <div className="stat-tile">
-              <span className={`stat-value ${net >= 0 ? "text-green" : "text-red"}`}>
-                {net >= 0 ? "+" : ""}{fmt(net)}
-              </span>
-              <span className="stat-label">Net</span>
-            </div>
-          )}
+          <div className="stat-tile">
+            <span className="stat-value text-green">{fmt(totalIn)}</span>
+            <span className="stat-label">Money In</span>
+          </div>
+          <div className="stat-tile">
+            <span className={`stat-value ${net >= 0 ? "text-green" : "text-red"}`}>
+              {net >= 0 ? "+" : ""}{fmt(net)}
+            </span>
+            <span className="stat-label">Net</span>
+          </div>
         </div>
 
         <ComparisonCard dateParams={allParams} />
 
-        <SpendingTrendChart dateParams={allParams} monthlyIncome={income} />
+        <SpendingTrendChart dateParams={allParams} monthlyIncome={monthlyIncome} />
 
         <CategoryDonut
           categories={by_category}
@@ -273,6 +270,7 @@ export default function Dashboard({ onQueueChange }) {
         <CategoryBreakdown
           categories={by_category}
           selectedId={selectedCategoryId}
+          dateParams={dateParams}
         />
 
         <MerchantInsights dateParams={allParams} />

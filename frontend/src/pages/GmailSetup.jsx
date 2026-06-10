@@ -61,7 +61,6 @@ export default function GmailSetup() {
         <h1 style={{ marginLeft: 8 }}>Gmail Sync Setup</h1>
       </div>
 
-      {/* How it works */}
       <div className="profile-block">
         <p className="section-label">How It Works</p>
         <div className="card">
@@ -88,7 +87,6 @@ export default function GmailSetup() {
         </div>
       </div>
 
-      {/* Unread warning */}
       <div className="profile-block">
         <p className="section-label">Important: Unread Emails Only</p>
         <div className="card">
@@ -105,7 +103,6 @@ export default function GmailSetup() {
         </div>
       </div>
 
-      {/* Recommended: dedicated account */}
       <div className="profile-block">
         <p className="section-label">Recommended: Dedicated Gmail + Forwarding</p>
         <div className="card">
@@ -162,7 +159,6 @@ export default function GmailSetup() {
         </div>
       </div>
 
-      {/* Alternative: existing Gmail */}
       <div className="profile-block">
         <p className="section-label">Alternative: Use Your Existing Gmail</p>
         <div className="card">
@@ -201,7 +197,6 @@ export default function GmailSetup() {
         </div>
       </div>
 
-      {/* Troubleshooting */}
       <div className="profile-block">
         <p className="section-label">Troubleshooting</p>
         <div className="card">

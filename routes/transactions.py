@@ -86,14 +86,39 @@ def list_transactions():
     elif source == "credit":
         where_clauses.append("(t.notes IS NULL OR (t.notes NOT LIKE 'venmo:%' AND t.notes != 'venmo'))")
 
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    include_ids_raw = request.args.get("include_ids", "")
+    include_ids: list[int] = []
+    if include_ids_raw:
+        try:
+            include_ids = [int(x) for x in include_ids_raw.split(",") if x.strip()]
+        except ValueError:
+            pass
+
+    if include_ids:
+        ph = ",".join("?" * len(include_ids))
+        base = " AND ".join(where_clauses)
+        where_sql = f"WHERE ({base}) OR t.id IN ({ph})" if base else f"WHERE t.id IN ({ph})"
+        extra_params = include_ids
+    else:
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        extra_params = []
+
+    _SORT_MAP = {
+        "date_desc":    "t.transaction_at DESC",
+        "date_asc":     "t.transaction_at ASC",
+        "amount_desc":  "t.amount DESC",
+        "amount_asc":   "t.amount ASC",
+        "merchant_asc": "t.merchant_raw ASC NULLS LAST",
+    }
+    sort_key = request.args.get("sort", "date_desc")
+    order_by = _SORT_MAP.get(sort_key, "t.transaction_at DESC")
 
     total = db.execute(
-        f"SELECT COUNT(*) FROM transactions t {where_sql}", params
+        f"SELECT COUNT(*) FROM transactions t {where_sql}", params + extra_params
     ).fetchone()[0]
     rows = db.execute(
-        _TXN_SELECT + f"{where_sql} ORDER BY t.transaction_at DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
+        _TXN_SELECT + f"{where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+        params + extra_params + [limit, offset],
     ).fetchall()
 
     return _ok({

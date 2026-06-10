@@ -149,7 +149,6 @@ export default function MerchantInsights({ dateParams }) {
           </>
         )}
 
-        {/* Recurring Spend */}
         {repeat_merchants.length > 0 && (
           <>
             <p className="section-label" style={{ padding: "14px 16px 6px", margin: 0 }}>
