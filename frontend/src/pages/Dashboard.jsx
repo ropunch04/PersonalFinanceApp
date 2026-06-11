@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useOnline } from "../context/OnlineContext";
@@ -36,7 +36,7 @@ function formatSyncAge(lastSyncedAt) {
   }
 }
 
-function SyncPill({ syncStatus, refreshing, onRefresh }) {
+function SyncPill({ syncStatus, refreshing, onRefresh, syncError }) {
   const syncAge = formatSyncAge(syncStatus?.last_synced_at);
   const navigate = useNavigate();
   const { isOnline } = useOnline();
@@ -48,21 +48,23 @@ function SyncPill({ syncStatus, refreshing, onRefresh }) {
       display: "inline-flex", alignItems: "center", gap: 5,
       background: "var(--bg)", borderRadius: 20, padding: "3px 10px",
       fontSize: 11, color: "var(--text-secondary)", marginTop: 4,
-      border: "1px solid var(--border)",
+      border: `1px solid ${syncError ? "var(--red)" : "var(--border)"}`,
     }}>
       <span style={{
         width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-        background: syncAge ? "var(--green)" : "var(--border)",
+        background: syncError ? "var(--red)" : syncAge ? "var(--green)" : "var(--border)",
       }} />
       <span>
-        {syncAge
-          ? `Synced ${syncAge}`
-          : syncStatus.credentials_configured
-            ? "Never synced"
-            : <span
-                style={{ color: "var(--primary)", cursor: "pointer" }}
-                onClick={() => navigate("/profile")}
-              >Connect Gmail</span>
+        {syncError
+          ? <span style={{ color: "var(--red)" }}>Sync failed</span>
+          : syncAge
+            ? `Synced ${syncAge}`
+            : syncStatus.credentials_configured
+              ? "Never synced"
+              : <span
+                  style={{ color: "var(--primary)", cursor: "pointer" }}
+                  onClick={() => navigate("/profile")}
+                >Connect Gmail</span>
         }
       </span>
       {syncStatus.credentials_configured && isOnline && (
@@ -88,6 +90,7 @@ export default function Dashboard({ onQueueChange }) {
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncError, setSyncError] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [showPinPicker, setShowPinPicker] = useState(false);
   const navigate = useNavigate();
@@ -112,14 +115,22 @@ export default function Dashboard({ onQueueChange }) {
     api.syncStatus().then(setSyncStatus).catch(() => {});
   }, []);
 
+  const handleSynced = useCallback(async (result) => {
+    setSyncError(null);
+    const status = await api.syncStatus().catch(() => null);
+    if (status) setSyncStatus(status);
+    if (result?.new_transactions > 0 || result?.imported > 0) load(allParams);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSyncError = useCallback((err) => {
+    setSyncError(err?.message ?? "Sync failed");
+  }, []);
+
   usePwaSync({
     credentialsConfigured: syncStatus?.credentials_configured ?? false,
     lastSyncedAt: syncStatus?.last_synced_at ?? null,
-    onSynced: async (result) => {
-      const status = await api.syncStatus().catch(() => null);
-      if (status) setSyncStatus(status);
-      if (result?.new_transactions > 0 || result?.imported > 0) load(dateParams);
-    },
+    onSynced: handleSynced,
+    onError: handleSyncError,
   });
 
   async function load(params) {
@@ -179,6 +190,7 @@ export default function Dashboard({ onQueueChange }) {
               syncStatus={syncStatus}
               refreshing={refreshing}
               onRefresh={handleRefreshSync}
+              syncError={syncError}
             />
           </div>
 
