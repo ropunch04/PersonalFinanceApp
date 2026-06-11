@@ -61,8 +61,10 @@ def get_db_path(user_id: int) -> str:
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
     if "user_db" not in g:
-        init_user_db(user_id)
-        conn = sqlite3.connect(get_db_path(user_id))
+        db_path = get_db_path(user_id)
+        if not Path(db_path).exists():
+            init_user_db(user_id)
+        conn = sqlite3.connect(db_path, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -72,7 +74,7 @@ def get_user_db(user_id: int) -> sqlite3.Connection:
 
 def init_user_db(user_id: int) -> None:
     Path("data").mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(get_db_path(user_id))
+    conn = sqlite3.connect(get_db_path(user_id), timeout=15)
     try:
         conn.executescript(_SCHEMA)
         now = datetime.now(timezone.utc).isoformat()

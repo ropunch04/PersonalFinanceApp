@@ -14,8 +14,12 @@ _IMAP_HOST = "imap.gmail.com"
 _IMAP_PORT = 993
 
 _CAP1_AMOUNT = re.compile(r"\$\s*([\d,]+\.\d{2})")
+_CAP1_MERCHANT_SPECIFIC = re.compile(
+    r"\bat\s+([^,\n\r]{2,80}?),\s+a\s+(?:pending|purchase)\b",
+    re.IGNORECASE,
+)
 _CAP1_MERCHANT = re.compile(
-    r"(?:at|from|purchase at|used at|charged at)\s+([A-Z0-9][^\n\r.,]{2,50}?)(?=\s+on\s|\s+for\s|\.|,|$)",
+    r"\b(?:at|from|purchase at|used at|charged at)\s+([A-Z0-9][^\n\r.,]{2,50}?)(?=\s+on\s|\s+for\s|\.|,|$)",
     re.IGNORECASE,
 )
 _CAP1_DATE = re.compile(
@@ -71,6 +75,24 @@ def _get_text(msg: Message) -> str:
     return ""
 
 
+def _get_venmo_memo(msg: Message) -> str | None:
+    for part in msg.walk():
+        if part.get_content_type() != "text/html":
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        html = payload.decode(charset, errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
+        note = soup.find(class_="transaction-note")
+        if note:
+            return note.get_text(strip=True) or None
+    return None
+
+
 def _parse_cap1_date(text: str) -> str:
     m = _CAP1_DATE.search(text)
     if m:
@@ -96,8 +118,8 @@ def _parse_charge_email(msg: Message, message_id: str, conn) -> dict | None:
         return None
     amount = float(amount_m.group(1).replace(",", ""))
 
-    merchant_m = _CAP1_MERCHANT.search(text)
-    merchant_raw = merchant_m.group(1).strip() if merchant_m else subject
+    merchant_m = _CAP1_MERCHANT_SPECIFIC.search(text) or _CAP1_MERCHANT.search(text)
+    merchant_raw = merchant_m.group(1).strip() if merchant_m else "Unknown Merchant"
 
     return {
         "amount": amount,
@@ -190,14 +212,16 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
         return None
 
     person = merchant_raw
+    memo = _get_venmo_memo(msg) or "Venmo"
+    notes = f"venmo:{txn_type}:{person}" if person else "venmo"
     return {
         "amount": amount,
         "direction": direction,
-        "merchant_raw": "Venmo",
-        "category_id": _get_category_id(conn, "Venmo") if conn else None,
+        "merchant_raw": memo,
+        "category_id": _get_category_id(conn, memo) if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("venmo_email", message_id),
-        "notes": f"venmo:{txn_type}:{person}",
+        "notes": notes,
     }
 
 
@@ -205,10 +229,7 @@ def _get_category_id(conn, merchant_raw: str) -> int | None:
     row = conn.execute(
         "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
     ).fetchone()
-    if row:
-        return row["id"]
-    other = conn.execute("SELECT id FROM categories WHERE LOWER(name) = 'other'").fetchone()
-    return other["id"] if other else None
+    return row["id"] if row else None
 
 
 def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list[dict], list[dict]]:

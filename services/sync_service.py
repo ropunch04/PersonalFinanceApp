@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def _open_user_db(user_id: int) -> sqlite3.Connection:
-    conn = sqlite3.connect(get_db_path(user_id))
+    conn = sqlite3.connect(get_db_path(user_id), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
