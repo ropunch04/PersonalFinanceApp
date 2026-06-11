@@ -160,44 +160,6 @@ export default function GmailSetup() {
       </div>
 
       <div className="profile-block">
-        <p className="section-label">Alternative: Use Your Existing Gmail</p>
-        <div className="card">
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 14 }}>
-            If you prefer not to create a separate account, you can connect your main Gmail
-            directly. You'll need to make sure notification emails stay unread.
-          </p>
-
-          <Step n={1}>
-            Enable 2-Step Verification on your Google account:{" "}
-            <ExternalLink href="https://myaccount.google.com/security">
-              myaccount.google.com → Security
-            </ExternalLink>
-          </Step>
-
-          <Step n={2}>
-            Create an App Password at{" "}
-            <ExternalLink href="https://myaccount.google.com/apppasswords">
-              myaccount.google.com/apppasswords
-            </ExternalLink>{" "}
-            (Mail → Other → "Finance App") and copy the 16-character code.
-          </Step>
-
-          <Step n={3}>
-            Create a Gmail filter to keep notification emails unread:
-            <ul style={{ marginTop: 6, paddingLeft: 18, lineHeight: 1.8 }}>
-              <li>Settings → Filters → Create new filter</li>
-              <li><em>From</em>: <code style={{ background: "var(--surface-raised)", borderRadius: 4, padding: "1px 4px", fontSize: 12 }}>capitalone.com</code> and repeat for <code style={{ background: "var(--surface-raised)", borderRadius: 4, padding: "1px 4px", fontSize: 12 }}>venmo@venmo.com</code></li>
-              <li>Action: <strong>Never mark as read</strong></li>
-            </ul>
-          </Step>
-
-          <Step n={4}>
-            Enter your Gmail address and App Password in Profile → Gmail Sync.
-          </Step>
-        </div>
-      </div>
-
-      <div className="profile-block">
         <p className="section-label">Troubleshooting</p>
         <div className="card">
           {[
