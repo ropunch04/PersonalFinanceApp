@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from services.sync_service import scheduled_sync_all
 
-bind = "0.0.0.0:5100"
+bind = "127.0.0.1:5100"
 workers = 2
 timeout = 120
 preload_app = True

@@ -1,12 +1,15 @@
 import os
+from datetime import datetime, timezone
 
 import bcrypt
 from flask import Blueprint, g, request
 
+from limiter import limiter
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
 from models.user import (
+    _connect,
     create_user,
     get_user_by_email,
     get_user_by_id,
@@ -20,6 +23,7 @@ _GENERIC_LOGIN_ERROR = {"error": "Invalid credentials"}
 
 
 @bp.post("/register")
+@limiter.limit("10 per hour")
 def register():
     if os.environ.get("REGISTRATION_ENABLED", "true").lower() == "false":
         return {"error": "Registration is closed"}, 403
@@ -31,6 +35,9 @@ def register():
 
     if not username or not email or not password:
         return {"error": "username, email, and password are required"}, 400
+
+    if len(password) < 8:
+        return {"error": "Password must be at least 8 characters"}, 400
 
     if get_user_by_username(username):
         return {"error": "Username already taken"}, 409
@@ -56,6 +63,7 @@ def register():
 
 
 @bp.post("/login")
+@limiter.limit("20 per minute; 100 per hour")
 def login():
     body = request.get_json(silent=True) or {}
     identifier = body.get("username", "").strip()
@@ -69,6 +77,13 @@ def login():
         return _GENERIC_LOGIN_ERROR, 401
 
     init_user_db(row["id"])
+
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), row["id"]),
+        )
+
     token = encode_token(row["id"], row["username"], bool(row["is_admin"]))
     return {
         "data": {
@@ -85,6 +100,7 @@ def login():
 
 @bp.post("/change-password")
 @require_auth
+@limiter.limit("10 per hour")
 def change_password():
     body = request.get_json(silent=True) or {}
     current_password = body.get("current_password", "")

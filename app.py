@@ -5,9 +5,9 @@ from logging.handlers import RotatingFileHandler
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from flask import Flask, g, send_from_directory
-
+from flask import Flask, g, request, send_from_directory
 import config
+from limiter import limiter
 from models.user import init_master_db
 from routes.admin_routes import admin_bp
 from routes.auth_routes import bp as auth_bp
@@ -24,6 +24,12 @@ load_dotenv()
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__)
+
+# 10 MB max upload size
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+limiter.init_app(app)
+
 app.register_blueprint(admin_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(categories_bp)
@@ -48,6 +54,39 @@ def close_user_db(_):
     db = g.pop("user_db", None)
     if db is not None:
         db.close()
+
+
+@app.after_request
+def apply_headers(response):
+    origin = request.headers.get("Origin", "")
+    if origin == config.ALLOWED_ORIGIN:
+        response.headers["Access-Control-Allow-Origin"] = config.ALLOWED_ORIGIN
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Vary"] = "Origin"
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
+    return response
+
+
+@app.route("/api/", methods=["OPTIONS"])
+@app.route("/api/<path:path>", methods=["OPTIONS"])
+def options_handler(path=""):
+    response = app.make_default_options_response()
+    response.headers["Access-Control-Allow-Origin"] = config.ALLOWED_ORIGIN
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
 
 
 @app.get("/", defaults={"path": ""})
