@@ -74,7 +74,7 @@ function UserRow({ user, currentUserId, onUpdated, onDeleted }) {
         <div>
           <div className="admin-user-name">
             {user.username}
-            {user.is_admin && <span className="admin-badge" style={{ marginLeft: 6 }}>Admin</span>}
+            {!!user.is_admin && <span className="admin-badge" style={{ marginLeft: 6 }}>Admin</span>}
           </div>
           <div className="admin-user-meta">{user.email || "—"}</div>
         </div>
@@ -103,7 +103,7 @@ function UserRow({ user, currentUserId, onUpdated, onDeleted }) {
               <label className="checkbox-label">
                 <input
                   type="checkbox"
-                  checked={user.is_admin}
+                  checked={!!user.is_admin}
                   onChange={handleToggleAdmin}
                   disabled={busy}
                 />
@@ -217,7 +217,7 @@ export default function Admin() {
   const token = localStorage.getItem("finance_token");
   let currentUserId = null;
   try {
-    currentUserId = JSON.parse(atob(token.split(".")[1])).sub;
+    currentUserId = parseInt(JSON.parse(atob(token.split(".")[1])).sub);
   } catch {
   }
 
