@@ -18,7 +18,7 @@ _scheduler: BackgroundScheduler | None = None
 def on_starting(server):
     global _scheduler
     _scheduler = BackgroundScheduler(daemon=True)
-    _scheduler.add_job(scheduled_sync_all, trigger="cron", hour=3, minute=0)
+    _scheduler.add_job(scheduled_sync_all, trigger="cron", hour=3, minute=0, misfire_grace_time=300)
     _scheduler.start()
     atexit.register(lambda: _scheduler.running and _scheduler.shutdown(wait=False))
 
