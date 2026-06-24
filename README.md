@@ -1,3 +1,5 @@
+# DO NOT MERGE TO MAIN!!
+
 # Personal Finance App
 
 A self-hosted personal finance tracker with a Flask/SQLite backend and a React 19 frontend. Designed to run on a Raspberry Pi (or any Linux box) and optionally exposed via Cloudflare Tunnel. Transactions can be imported from Capital One or Venmo CSV exports, or synced automatically from Gmail.
