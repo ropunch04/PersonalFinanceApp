@@ -41,10 +41,15 @@ def get_budget_summary(
         p,
     ).fetchone()[0]
 
+    year = date.fromisoformat(end_date).year
+    year_start = f"{year}-01-01"
+    year_end   = f"{year}-12-31"
+
     by_category = conn.execute(f"""
         SELECT
             c.id   AS category_id,
             c.name AS category_name,
+            COALESCE(b.period, 'monthly') AS period,
             COALESCE(SUM(
                 CASE WHEN t.direction = 'outflow' THEN  t.amount
                      WHEN t.direction = 'inflow'  THEN -t.amount
@@ -52,12 +57,15 @@ def get_budget_summary(
             ), 0) AS spent,
             COALESCE(b.amount, 0) AS budget
         FROM categories c
-        LEFT JOIN transactions t ON t.category_id = c.id
-            AND {w_join}
         LEFT JOIN budgets b ON b.category_id = c.id
-        GROUP BY c.id, c.name, b.amount
+        LEFT JOIN transactions t ON t.category_id = c.id AND (
+            (COALESCE(b.period, 'monthly') = 'monthly' AND {w_join})
+            OR
+            (COALESCE(b.period, 'monthly') = 'yearly'  AND t.transaction_at BETWEEN ? AND ?)
+        )
+        GROUP BY c.id, c.name, b.amount, b.period
         ORDER BY spent DESC
-    """, p).fetchall()
+    """, p + [year_start, year_end]).fetchall()
 
     return {
         "total_spent":  total_spent,
@@ -66,11 +74,12 @@ def get_budget_summary(
         "pending_count": pending_count,
         "by_category": [
             {
-                "category_id": r["category_id"],
+                "category_id":   r["category_id"],
                 "category_name": r["category_name"],
-                "spent": r["spent"],
-                "budget": r["budget"],
-                "remaining": r["budget"] - r["spent"],
+                "period":        r["period"],
+                "spent":         r["spent"],
+                "budget":        r["budget"],
+                "remaining":     r["budget"] - r["spent"],
             }
             for r in by_category
         ],

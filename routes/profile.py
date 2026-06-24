@@ -22,7 +22,7 @@ def _fetch_profile(conn) -> dict:
     ).fetchone()
     budgets = conn.execute(
         """
-        SELECT b.category_id, c.name AS category_name, b.amount
+        SELECT b.category_id, c.name AS category_name, b.amount, b.period
         FROM budgets b
         JOIN categories c ON c.id = b.category_id
         ORDER BY c.name
@@ -65,11 +65,14 @@ def update_profile():
         for entry in budgets:
             category_id = entry.get("category_id")
             amount = entry.get("amount")
+            period = entry.get("period", "monthly")
             if category_id is None or amount is None:
                 return _err("Each budget entry must include category_id and amount", 400)
+            if period not in ("monthly", "yearly"):
+                return _err("period must be 'monthly' or 'yearly'", 400)
             conn.execute(
-                "UPDATE budgets SET amount = ? WHERE category_id = ?",
-                (amount, category_id),
+                "UPDATE budgets SET amount = ?, period = ? WHERE category_id = ?",
+                (amount, period, category_id),
             )
 
     conn.commit()

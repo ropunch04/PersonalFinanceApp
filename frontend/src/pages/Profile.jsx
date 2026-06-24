@@ -85,6 +85,7 @@ export default function Profile({ setup = false }) {
         budgets: budgets.map((b) => ({
           category_id: b.category_id,
           amount: parseFloat(b.amount),
+          period: b.period ?? "monthly",
         })),
       });
       setProfile(updated);
@@ -182,7 +183,7 @@ export default function Profile({ setup = false }) {
                   <p className="field-label" style={{ marginBottom: 8 }}>Category Budgets</p>
                   <div className="budget-list">
                     {budgets.map((b, i) => (
-                      <div className="budget-row" key={b.category_id}>
+                      <div className="budget-row" key={b.category_id} style={{ alignItems: "center", gap: 8 }}>
                         <span className="budget-cat">{b.category_name}</span>
                         <input
                           type="number"
@@ -198,6 +199,35 @@ export default function Profile({ setup = false }) {
                           min="0"
                           placeholder="0.00"
                         />
+                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                          {["monthly", "yearly"].map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() =>
+                                setBudgets((prev) =>
+                                  prev.map((item, idx) =>
+                                    idx === i ? { ...item, period: p } : item
+                                  )
+                                )
+                              }
+                              style={{
+                                padding: "3px 8px",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                borderRadius: 6,
+                                border: `1.5px solid ${(b.period ?? "monthly") === p ? "var(--primary)" : "var(--border)"}`,
+                                background: (b.period ?? "monthly") === p ? "rgba(108,99,255,0.15)" : "transparent",
+                                color: (b.period ?? "monthly") === p ? "var(--primary)" : "var(--text-muted)",
+                                cursor: "pointer",
+                                minWidth: "unset",
+                                minHeight: "unset",
+                              }}
+                            >
+                              {p === "monthly" ? "Mo" : "Yr"}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>

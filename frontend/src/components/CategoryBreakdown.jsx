@@ -76,7 +76,12 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
             </div>
 
             <div style={{ fontSize: 12, color: "#94A3B8" }}>
-              {budget > 0 ? `${fmt(spent)} / ${fmt(budget)}` : fmt(spent)}
+              {budget > 0
+                ? `${fmt(spent)} / ${fmt(budget)} ${cat.period === "yearly" ? "yr" : "mo"}`
+                : fmt(spent)}
+              {cat.period === "yearly" && budget > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: "#475569" }}>Jan–Dec</span>
+              )}
             </div>
           </div>
         );

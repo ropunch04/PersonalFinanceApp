@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS budgets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER NOT NULL REFERENCES categories(id),
     amount      REAL    NOT NULL DEFAULT 0,
+    period      TEXT    NOT NULL DEFAULT 'monthly' CHECK(period IN ('monthly', 'yearly')),
     UNIQUE(category_id)
 );
 """
@@ -55,6 +56,15 @@ CREATE TABLE IF NOT EXISTS budgets (
 
 def get_db_path(user_id: int) -> str:
     return f"data/user_{user_id}_finance.db"
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply any schema migrations needed for existing DBs."""
+    try:
+        conn.execute("ALTER TABLE budgets ADD COLUMN period TEXT NOT NULL DEFAULT 'monthly'")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
 
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
@@ -66,6 +76,7 @@ def get_user_db(user_id: int) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        _migrate(conn)
         g.user_db = conn
     return g.user_db
 
