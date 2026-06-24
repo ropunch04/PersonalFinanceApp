@@ -18,7 +18,7 @@ def _err(message, status):
 
 def _fetch_profile(conn) -> dict:
     row = conn.execute(
-        "SELECT monthly_income, savings_target, gmail_address, last_synced_at FROM profile WHERE id = 1"
+        "SELECT gmail_address, last_synced_at FROM profile WHERE id = 1"
     ).fetchone()
     budgets = conn.execute(
         """
@@ -29,8 +29,6 @@ def _fetch_profile(conn) -> dict:
         """
     ).fetchall()
     return {
-        "monthly_income": row["monthly_income"] if row else 0,
-        "savings_target": row["savings_target"] if row else 0,
         "gmail_address": row["gmail_address"] if row else None,
         "gmail_configured": bool(row["gmail_address"]) if row else False,
         "last_synced_at": row["last_synced_at"] if row else None,
@@ -51,7 +49,7 @@ def update_profile():
     conn = get_user_db(g.current_user["user_id"])
     body = request.get_json(silent=True) or {}
 
-    scalar_fields = {"monthly_income", "savings_target"}
+    scalar_fields = set()
     updates = {k: v for k, v in body.items() if k in scalar_fields}
 
     if updates:

@@ -25,13 +25,6 @@ def get_budget_summary(
         w_null  = "category_id IS NULL AND transaction_at BETWEEN ? AND ?"
     p = [start_date, end_date] + ids
 
-    profile = conn.execute(
-        "SELECT monthly_income, savings_target FROM profile WHERE id = 1"
-    ).fetchone()
-
-    monthly_income = (profile["monthly_income"] or 0) if profile else 0
-    savings_target = (profile["savings_target"] or 0) if profile else 0
-
     totals = conn.execute(f"""
         SELECT
             COALESCE(SUM(CASE WHEN direction = 'outflow' THEN amount ELSE 0 END), 0) AS total_spent,
@@ -40,7 +33,7 @@ def get_budget_summary(
         WHERE {w_where}
     """, p).fetchone()
 
-    total_spent = totals["total_spent"]
+    total_spent  = totals["total_spent"]
     total_income = totals["total_income"]
 
     pending_count = conn.execute(
@@ -67,12 +60,9 @@ def get_budget_summary(
     """, p).fetchall()
 
     return {
-        "monthly_income": monthly_income,
-        "savings_target": savings_target,
-        "total_spent": total_spent,
+        "total_spent":  total_spent,
         "total_income": total_income,
-        "net": total_income - total_spent,
-        "savings_amount": monthly_income * (savings_target / 100),
+        "net":          total_income - total_spent,
         "pending_count": pending_count,
         "by_category": [
             {

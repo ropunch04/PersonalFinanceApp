@@ -47,8 +47,6 @@ export default function Profile({ setup = false }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [income, setIncome] = useState("");
-  const [savingsTarget, setSavingsTarget] = useState("");
   const [budgets, setBudgets] = useState([]);
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState(null);
@@ -71,8 +69,6 @@ export default function Profile({ setup = false }) {
     api.getProfile()
       .then((data) => {
         setProfile(data);
-        setIncome(data.monthly_income ?? "");
-        setSavingsTarget(data.savings_target ?? "");
         setBudgets(data.budgets.map((b) => ({ ...b })));
         setGmailAddress(data.gmail_address ?? "");
       })
@@ -86,8 +82,6 @@ export default function Profile({ setup = false }) {
     setBudgetMsg(null);
     try {
       const updated = await api.updateProfile({
-        monthly_income: parseFloat(income),
-        savings_target: parseFloat(savingsTarget),
         budgets: budgets.map((b) => ({
           category_id: b.category_id,
           amount: parseFloat(b.amount),
@@ -183,29 +177,6 @@ export default function Profile({ setup = false }) {
         <div className="card">
           <form onSubmit={handleSaveBudget}>
             <div className="form-stack">
-              <div className="field">
-                <label className="field-label">Monthly Income</label>
-                <input
-                  type="number"
-                  value={income}
-                  onChange={(e) => setIncome(e.target.value)}
-                  step="0.01"
-                  min="0"
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="field">
-                <label className="field-label">Savings Target</label>
-                <input
-                  type="number"
-                  value={savingsTarget}
-                  onChange={(e) => setSavingsTarget(e.target.value)}
-                  step="0.01"
-                  min="0"
-                  placeholder="0.00"
-                />
-              </div>
-
               {budgets.length > 0 && (
                 <div>
                   <p className="field-label" style={{ marginBottom: 8 }}>Category Budgets</p>

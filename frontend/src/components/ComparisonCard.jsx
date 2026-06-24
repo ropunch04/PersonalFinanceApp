@@ -150,33 +150,24 @@ export default function ComparisonCard({ dateParams }) {
 
       {velocity && (
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-          {(() => {
-            const over = current?.income > 0 && velocity.projected_spend > current?.income;
-            const color = over ? "#EF4444" : "#22C55E";
-            return (
-              <>
-                <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 8 }}>
-                  On pace to spend{" "}
-                  <span style={{ fontWeight: 700, color }}>
-                    {fmt(velocity.projected_spend)}
-                  </span>
-                  {" "}this month
-                  {over && <span style={{ color: "#EF4444" }}> — over budget</span>}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: "#22263A", overflow: "hidden" }}>
-                    <div style={{
-                      width: `${Math.min((velocity.days_elapsed / velocity.days_in_month) * 100, 100)}%`,
-                      height: "100%", borderRadius: 2, background: "#6C63FF",
-                    }} />
-                  </div>
-                  <span style={{ fontSize: 11, color: "#475569", flexShrink: 0 }}>
-                    {velocity.days_elapsed}d / {velocity.days_in_month}d
-                  </span>
-                </div>
-              </>
-            );
-          })()}
+          <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 8 }}>
+            On pace to spend{" "}
+            <span style={{ fontWeight: 700, color: "#F1F5F9" }}>
+              {fmt(velocity.projected_spend)}
+            </span>
+            {" "}this month
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, background: "#22263A", overflow: "hidden" }}>
+              <div style={{
+                width: `${Math.min((velocity.days_elapsed / velocity.days_in_month) * 100, 100)}%`,
+                height: "100%", borderRadius: 2, background: "#6C63FF",
+              }} />
+            </div>
+            <span style={{ fontSize: 11, color: "#475569", flexShrink: 0 }}>
+              {velocity.days_elapsed}d / {velocity.days_in_month}d
+            </span>
+          </div>
         </div>
       )}
     </div>

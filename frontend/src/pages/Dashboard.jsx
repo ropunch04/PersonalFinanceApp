@@ -169,10 +169,9 @@ export default function Dashboard({ onQueueChange }) {
   );
 
   const { pending_count, by_category } = data;
-  const spent      = data.total_spent   ?? 0;
-  const totalIn    = data.total_income  ?? 0;
-  const monthlyIncome = data.monthly_income ?? 0;
-  const net = totalIn - spent;
+  const spent    = data.total_spent  ?? 0;
+  const totalIn  = data.total_income ?? 0;
+  const net      = totalIn - spent;
 
   return (
     <>
@@ -272,7 +271,7 @@ export default function Dashboard({ onQueueChange }) {
 
         <ComparisonCard dateParams={allParams} />
 
-        <SpendingTrendChart dateParams={allParams} monthlyIncome={monthlyIncome} />
+        <SpendingTrendChart dateParams={allParams} />
 
         <CategoryDonut
           categories={by_category}

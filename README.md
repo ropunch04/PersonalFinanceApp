@@ -173,8 +173,7 @@ Passwords are hashed with bcrypt. This DB is never exposed to the frontend direc
 categories   (id, name)
 transactions (id, amount, merchant_raw, direction, category_id, notes,
               transaction_at, created_at, source_hash, reimburses_id)
-profile      (id=1, monthly_income, savings_target,
-              gmail_address, gmail_app_password_enc, last_synced_at, ...)
+profile      (id=1, gmail_address, gmail_app_password_enc, last_synced_at, ...)
 budgets      (id, category_id, amount)
 ```
 
@@ -256,7 +255,7 @@ CRUD for categories. `GET /api/categories/unclassified-merchants` returns mercha
 
 ### Profile — `/api/profile`
 
-`GET`/`PUT` for monthly income, savings target, Gmail credentials.
+`GET`/`PUT` for category budgets and Gmail credentials.
 
 ---
 
@@ -304,8 +303,8 @@ frontend/src/
 ├── pages/
 │   ├── Dashboard.jsx         # Home page — stat tiles, charts, category breakdown
 │   ├── Transactions.jsx      # Full transaction list with filters, sort, pagination
-│   ├── Profile.jsx           # Monthly income, savings target
-│   ├── GmailSetup.jsx        # Gmail credentials form
+│   ├── Profile.jsx           # Category budgets, Gmail credentials, account settings
+│   ├── GmailSetup.jsx        # Gmail IMAP setup instructions
 │   ├── Login.jsx / Register.jsx
 │   ├── Import.jsx            # CSV import UI
 │   └── Admin.jsx             # User management (admin only)

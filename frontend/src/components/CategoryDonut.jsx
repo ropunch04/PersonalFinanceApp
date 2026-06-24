@@ -8,7 +8,6 @@ const CATEGORY_COLORS = {
   Health:        "#14B8A6",
   Housing:       "#F97316",
   Utilities:     "#8B5CF6",
-  Income:        "#22C55E",
   Other:         "#475569",
   Refund:        "#94A3B8",
 };

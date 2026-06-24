@@ -314,17 +314,11 @@ def dashboard_comparison():
         daily_rate    = current["spent"] / days_elapsed
         projected     = round(daily_rate * days_in_month, 2)
 
-        profile = conn.execute(
-            "SELECT monthly_income FROM profile WHERE id=1"
-        ).fetchone()
-        monthly_income = (profile["monthly_income"] or 0) if profile else 0
-
         velocity = {
-            "projected_spend":  projected,
-            "days_remaining":   days_in_month - days_elapsed,
-            "days_elapsed":     days_elapsed,
-            "days_in_month":    days_in_month,
-            "on_pace":          projected <= monthly_income if monthly_income > 0 else True,
+            "projected_spend": projected,
+            "days_remaining":  days_in_month - days_elapsed,
+            "days_elapsed":    days_elapsed,
+            "days_in_month":   days_in_month,
         }
 
     return {"data": {

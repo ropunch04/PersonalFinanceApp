@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, ReferenceLine,
+  Tooltip, ResponsiveContainer,
 } from "recharts";
 import { api } from "../api";
 
@@ -36,7 +36,7 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-export default function SpendingTrendChart({ dateParams, monthlyIncome }) {
+export default function SpendingTrendChart({ dateParams }) {
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState(null);
@@ -108,14 +108,6 @@ export default function SpendingTrendChart({ dateParams, monthlyIncome }) {
             dot={false}
             activeDot={{ r: 4 }}
           />
-          {(monthlyIncome ?? 0) > 0 && (
-            <ReferenceLine
-              y={monthlyIncome}
-              stroke="#6C63FF"
-              strokeDasharray="4 4"
-              label={{ value: "Income target", fill: "#6C63FF", fontSize: 10, position: "insideTopRight" }}
-            />
-          )}
         </LineChart>
       </ResponsiveContainer>
     </div>

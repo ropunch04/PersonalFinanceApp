@@ -37,8 +37,6 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE TABLE IF NOT EXISTS profile (
     id                      INTEGER PRIMARY KEY CHECK(id = 1),
-    monthly_income          REAL    NOT NULL DEFAULT 0,
-    savings_target          REAL    NOT NULL DEFAULT 0,
     gmail_address           TEXT,
     gmail_app_password_enc  TEXT,
     last_synced_at          TEXT,
@@ -83,8 +81,7 @@ def init_user_db(user_id: int) -> None:
             [(name,) for name in _DEFAULT_CATEGORIES],
         )
         conn.execute(
-            "INSERT OR IGNORE INTO profile (id, monthly_income, savings_target, created_at, updated_at)"
-            " VALUES (1, 0, 0, ?, ?)",
+            "INSERT OR IGNORE INTO profile (id, created_at, updated_at) VALUES (1, ?, ?)",
             (now, now),
         )
         conn.execute(

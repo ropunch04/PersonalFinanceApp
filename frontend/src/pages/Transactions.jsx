@@ -557,10 +557,10 @@ export default function Transactions() {
     return params;
   }
 
-  function fetchPage(p) {
+  function fetchPage(p, overrides = {}) {
     setLoading(true);
     setError(null);
-    api.getTransactions(buildParams(p))
+    api.getTransactions(buildParams(p, overrides))
       .then((data) => {
         setTransactions(data.transactions ?? data);
         setTotal(data.total ?? (data.transactions ?? data).length);
@@ -811,7 +811,11 @@ export default function Transactions() {
           {(filterCat || filterStatus || dateFrom || dateTo || search || source || sort !== "date_desc") && (
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => { setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); setSearch(""); setSource(""); setSort("date_desc"); }}
+              onClick={() => {
+                setFilterCat(""); setFilterStatus(""); setDateFrom(""); setDateTo(""); setSearch(""); setSource(""); setSort("date_desc");
+                clearTimeout(searchDebounceRef.current);
+                fetchPage(0, { filterCat: "", filterStatus: "", dateFrom: "", dateTo: "", search: "", source: "", sort: "date_desc" });
+              }}
             >
               Clear filters
             </button>
