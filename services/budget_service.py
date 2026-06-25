@@ -41,7 +41,12 @@ def get_budget_summary(
         p,
     ).fetchone()[0]
 
-    year = date.fromisoformat(end_date).year
+    start = date.fromisoformat(start_date)
+    end   = date.fromisoformat(end_date)
+    # Number of calendar months touched by the range (partial months count as full)
+    month_count = (end.year - start.year) * 12 + (end.month - start.month) + 1
+
+    year = end.year
     year_start = f"{year}-01-01"
     year_end   = f"{year}-12-31"
 
@@ -78,8 +83,8 @@ def get_budget_summary(
                 "category_name": r["category_name"],
                 "period":        r["period"],
                 "spent":         r["spent"],
-                "budget":        r["budget"],
-                "remaining":     r["budget"] - r["spent"],
+                "budget":        r["budget"] * month_count if r["period"] == "monthly" else r["budget"],
+                "remaining":     (r["budget"] * month_count if r["period"] == "monthly" else r["budget"]) - r["spent"],
             }
             for r in by_category
         ],

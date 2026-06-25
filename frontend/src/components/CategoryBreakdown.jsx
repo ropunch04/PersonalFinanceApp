@@ -51,8 +51,14 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
             onClick={() => {
               if (!cat.category_id) return;
               const p = new URLSearchParams({ category_id: cat.category_id });
-              if (dateParams?.start_date) p.set("date_from", dateParams.start_date);
-              if (dateParams?.end_date)   p.set("date_to",   dateParams.end_date);
+              if (cat.period === "yearly" && dateParams?.end_date) {
+                const year = new Date(dateParams.end_date + "T00:00:00").getFullYear();
+                p.set("date_from", `${year}-01-01`);
+                p.set("date_to",   `${year}-12-31`);
+              } else {
+                if (dateParams?.start_date) p.set("date_from", dateParams.start_date);
+                if (dateParams?.end_date)   p.set("date_to",   dateParams.end_date);
+              }
               navigate(`/transactions?${p.toString()}`);
             }}
           >
