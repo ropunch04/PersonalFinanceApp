@@ -186,7 +186,8 @@ export default function Profile({ setup = false }) {
                       <div className="budget-row" key={b.category_id} style={{ alignItems: "center", gap: 8 }}>
                         <span className="budget-cat">{b.category_name}</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           value={b.amount}
                           onChange={(e) =>
                             setBudgets((prev) =>
@@ -195,8 +196,6 @@ export default function Profile({ setup = false }) {
                               )
                             )
                           }
-                          step="0.01"
-                          min="0"
                           placeholder="0.00"
                         />
                         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
