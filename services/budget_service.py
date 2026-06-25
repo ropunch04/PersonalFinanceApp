@@ -43,8 +43,8 @@ def get_budget_summary(
 
     start = date.fromisoformat(start_date)
     end   = date.fromisoformat(end_date)
-    # Number of calendar months touched by the range (partial months count as full)
-    month_count = (end.year - start.year) * 12 + (end.month - start.month) + 1
+    days_in_range = (end - start).days + 1
+    month_count = max(1, round(days_in_range / 30.44))
 
     year = end.year
     year_start = f"{year}-01-01"
