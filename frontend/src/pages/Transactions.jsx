@@ -497,6 +497,60 @@ function needsReview(t) {
   return t.category_id == null;
 }
 
+function ReclassifyModal({ txn, categories, onClose, onDone }) {
+  const [toCategoryId, setToCategoryId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleConfirm() {
+    if (!toCategoryId) return;
+    setSaving(true);
+    try {
+      const result = await api.reclassify(txn.merchant_raw, txn.category_id, parseInt(toCategoryId));
+      onDone(result.updated);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const choices = categories.filter((c) => c.id !== txn.category_id);
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <span style={{ fontWeight: 600, fontSize: 16 }}>Reclassify all</span>
+          <button className="modal-close" onClick={onClose} type="button">×</button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 4 }}>
+          Move all <strong style={{ color: "var(--text)" }}>{txn.merchant_raw}</strong> transactions
+        </p>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+          from <strong style={{ color: "var(--text)" }}>{txn.category_name}</strong> to:
+        </p>
+        <select
+          value={toCategoryId}
+          onChange={(e) => setToCategoryId(e.target.value)}
+          style={{ width: "100%", marginBottom: 16 }}
+        >
+          <option value="">Select category…</option>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <button
+          className="btn btn-primary"
+          onClick={handleConfirm}
+          disabled={!toCategoryId || saving}
+        >
+          {saving ? "Moving…" : "Move all"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 export default function Transactions() {
   const [searchParams] = useSearchParams();
@@ -523,6 +577,7 @@ export default function Transactions() {
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [showClassify, setShowClassify] = useState(false);
   const [reimburseLinkingTxn, setReimburseLinkingTxn] = useState(null);
+  const [reclassifyFrom, setReclassifyFrom] = useState(null);
 
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -691,6 +746,20 @@ export default function Transactions() {
           categories={categories}
           onClose={() => setShowAdd(false)}
           onSaved={handleAdded}
+        />
+      )}
+
+      {reclassifyFrom && (
+        <ReclassifyModal
+          txn={reclassifyFrom}
+          categories={categories}
+          onClose={() => setReclassifyFrom(null)}
+          onDone={() => {
+            setReclassifyFrom(null);
+            setExpandedId(null);
+            fetchPage(page);
+            refreshUnclassifiedCount();
+          }}
         />
       )}
 
@@ -1013,6 +1082,12 @@ export default function Transactions() {
                               onClick={() => { setEditingId(t.id); setExpandedId(null); }}
                             >
                               Edit
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setReclassifyFrom(t)}
+                            >
+                              Reclassify all
                             </button>
                             <button
                               className="btn btn-ghost btn-sm"

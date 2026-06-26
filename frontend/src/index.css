@@ -49,10 +49,6 @@ a:not(.bottom-nav a) {
   min-height: 44px;
 }
 
-.bottom-nav a {
-  min-height: 44px;
-  min-width: 44px;
-}
 
 button {
   cursor: pointer;
@@ -151,22 +147,18 @@ a {
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
-  align-items: center;
-  justify-content: space-around;
+  align-items: stretch;
   z-index: 100;
 }
 
 .bottom-nav a {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 6px 10px;
-  min-width: 52px;
-  min-height: 44px;
   color: var(--text-muted);
-  border-radius: 10px;
   transition: color 120ms;
   text-decoration: none;
   position: relative;

@@ -74,7 +74,6 @@ def get_user_db(user_id: int) -> sqlite3.Connection:
             init_user_db(user_id)
         conn = sqlite3.connect(db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         _migrate(conn)
         g.user_db = conn
@@ -85,6 +84,7 @@ def init_user_db(user_id: int) -> None:
     Path("data").mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(get_db_path(user_id), timeout=15)
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
         now = datetime.now(timezone.utc).isoformat()
         conn.executemany(

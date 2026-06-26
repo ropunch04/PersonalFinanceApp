@@ -80,6 +80,8 @@ export const api = {
   deleteTransaction: (id) => request("DELETE", `/api/transactions/${id}`),
   bulkCategorize: (merchant_raw, category_id) =>
     request("POST", "/api/transactions/bulk-categorize", { merchant_raw, category_id }),
+  reclassify: (merchant_raw, from_category_id, to_category_id) =>
+    request("POST", "/api/transactions/reclassify", { merchant_raw, from_category_id, to_category_id }),
   getUnclassifiedMerchants: () =>
     request("GET", "/api/transactions/merchants/unclassified"),
   autoClassify: () =>

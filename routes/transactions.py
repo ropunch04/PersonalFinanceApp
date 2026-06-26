@@ -331,6 +331,29 @@ def bulk_categorize():
     return _ok({"updated": result.rowcount, "prefix": prefix})
 
 
+@bp.post("/transactions/reclassify")
+@require_auth
+def reclassify():
+    db = get_user_db(g.current_user["user_id"])
+    body = request.get_json(silent=True) or {}
+    merchant_raw = body.get("merchant_raw", "").strip()
+    from_id = body.get("from_category_id")
+    to_id = body.get("to_category_id")
+
+    if not merchant_raw or from_id is None or to_id is None:
+        return _err("merchant_raw, from_category_id and to_category_id are required", 400)
+    if from_id == to_id:
+        return _err("from and to categories must differ", 400)
+
+    prefix = _merchant_prefix(merchant_raw)
+    result = db.execute(
+        "UPDATE transactions SET category_id = ? WHERE category_id = ? AND merchant_raw LIKE ?",
+        (to_id, from_id, f"{prefix}%"),
+    )
+    db.commit()
+    return _ok({"updated": result.rowcount, "prefix": prefix})
+
+
 @bp.get("/transactions/linkable-outflows")
 @require_auth
 def linkable_outflows():
