@@ -16,13 +16,13 @@ def get_budget_summary(
     ids = pinned_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
-        w_where = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
-        w_join  = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
-        w_null  = f"(category_id IS NULL AND (transaction_at BETWEEN ? AND ? OR id IN ({ph})))"
+        w_where = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
+        w_join  = f"(DATE(t.transaction_at) BETWEEN ? AND ? OR t.id IN ({ph}))"
+        w_null  = f"(category_id IS NULL AND (DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph})))"
     else:
-        w_where = "transaction_at BETWEEN ? AND ?"
-        w_join  = "t.transaction_at BETWEEN ? AND ?"
-        w_null  = "category_id IS NULL AND transaction_at BETWEEN ? AND ?"
+        w_where = "DATE(transaction_at) BETWEEN ? AND ?"
+        w_join  = "DATE(t.transaction_at) BETWEEN ? AND ?"
+        w_null  = "category_id IS NULL AND DATE(transaction_at) BETWEEN ? AND ?"
     p = [start_date, end_date] + ids
 
     totals = conn.execute(f"""
@@ -66,7 +66,7 @@ def get_budget_summary(
         LEFT JOIN transactions t ON t.category_id = c.id AND (
             (COALESCE(b.period, 'monthly') = 'monthly' AND {w_join})
             OR
-            (COALESCE(b.period, 'monthly') = 'yearly'  AND t.transaction_at BETWEEN ? AND ?)
+            (COALESCE(b.period, 'monthly') = 'yearly'  AND DATE(t.transaction_at) BETWEEN ? AND ?)
         )
         GROUP BY c.id, c.name, b.amount, b.period
         ORDER BY spent DESC

@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email.message import Message
+from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
@@ -34,6 +35,11 @@ _CREDIT_AMOUNT_SPECIFIC = re.compile(r"credited your account for \$([0-9,]+\.\d{
 _CREDIT_AMOUNT_FALLBACK = re.compile(r"\+\$([0-9,]+\.\d{2})")
 _CREDIT_MERCHANT = re.compile(r"([A-Z][A-Z\s\*\-0-9]+)\n.*Card\.\.\.", re.IGNORECASE)
 _CREDIT_DATE = re.compile(r"(\w+\.\s*\d{1,2},?\s*\d{4})")
+
+_ZELLE_AMOUNT       = re.compile(r"Amount:\s*\$\s*([\d,]+\.\d{2})", re.IGNORECASE)
+_ZELLE_MEMO         = re.compile(r"Memo:\s*(.+?)\s+to:(.+?)(?:\r?\n|$)", re.IGNORECASE)
+_ZELLE_IN_AMOUNT    = re.compile(r"in the amount of \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
+_ZELLE_IN_SENDER    = re.compile(r"^(.+?) has just sent you money", re.IGNORECASE | re.MULTILINE)
 
 _VENMO_PAID = re.compile(r"paid you \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
 _VENMO_YOU_PAID = re.compile(r"you paid (?:.+?) \$\s*([\d,]+\.\d{2})", re.IGNORECASE)
@@ -225,6 +231,53 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
     }
 
 
+def _parse_zelle_email(msg: Message, message_id: str, conn) -> dict | None:
+    subject = msg.get("Subject", "")
+    if not re.search(r"zelle", subject, re.IGNORECASE):
+        return None
+
+    text = _get_text(msg)
+
+    try:
+        transaction_at = parsedate_to_datetime(msg.get("Date", "")).strftime("%Y-%m-%dT00:00:00")
+    except Exception:
+        transaction_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+
+    if re.search(r"someone sent you money", subject, re.IGNORECASE):
+        amount_m = _ZELLE_IN_AMOUNT.search(text)
+        if not amount_m:
+            return None
+        amount = float(amount_m.group(1).replace(",", ""))
+        sender_m = _ZELLE_IN_SENDER.search(text)
+        person = sender_m.group(1).strip() if sender_m else "Zelle"
+        return {
+            "amount": amount,
+            "direction": "inflow",
+            "merchant_raw": person,
+            "category_id": _get_category_id(conn, person) if conn else None,
+            "transaction_at": transaction_at,
+            "source_hash": _source_hash("zelle_received", message_id),
+            "notes": f"zelle:received:{person}",
+        }
+
+    # Outgoing: "You sent money with Zelle"
+    amount_m = _ZELLE_AMOUNT.search(text)
+    if not amount_m:
+        return None
+    amount = float(amount_m.group(1).replace(",", ""))
+    memo_m = _ZELLE_MEMO.search(text)
+    recipient = memo_m.group(2).strip() if memo_m else "Zelle"
+    return {
+        "amount": amount,
+        "direction": "outflow",
+        "merchant_raw": recipient,
+        "category_id": _get_category_id(conn, recipient) if conn else None,
+        "transaction_at": transaction_at,
+        "source_hash": _source_hash("zelle_sent", message_id),
+        "notes": f"zelle:sent:{recipient}",
+    }
+
+
 def _get_category_id(conn, merchant_raw: str) -> int | None:
     row = conn.execute(
         "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
@@ -243,6 +296,7 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
         searches = [
             (b'FROM "capitalone.com" SUBJECT "transaction"', None),
             (b'FROM "capitalone.com" SUBJECT "credit"', None),
+            (b'FROM "capitalone.com" SUBJECT "Zelle"', _parse_zelle_email),
             (b'FROM "venmo@venmo.com"', _parse_venmo_email),
         ]
 

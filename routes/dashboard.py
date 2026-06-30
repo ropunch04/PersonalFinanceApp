@@ -23,11 +23,11 @@ def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
     ids = pinned_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
-        w_where = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
-        w_join  = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
+        w_where = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
+        w_join  = f"(DATE(t.transaction_at) BETWEEN ? AND ? OR t.id IN ({ph}))"
     else:
-        w_where = "transaction_at BETWEEN ? AND ?"
-        w_join  = "t.transaction_at BETWEEN ? AND ?"
+        w_where = "DATE(transaction_at) BETWEEN ? AND ?"
+        w_join  = "DATE(t.transaction_at) BETWEEN ? AND ?"
     p = [start_str, end_str] + ids
 
     row = conn.execute(f"""
@@ -101,9 +101,9 @@ def dashboard_trend():
     ids = pinned_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
-        w = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
+        w = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
     else:
-        w = "transaction_at BETWEEN ? AND ?"
+        w = "DATE(transaction_at) BETWEEN ? AND ?"
     p = [start_str, end_str] + ids
 
     rows = conn.execute(f"""
@@ -160,11 +160,11 @@ def dashboard_merchants():
     ids = pinned_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
-        w = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
-        w_plain = f"(transaction_at BETWEEN ? AND ? OR id IN ({ph}))"
+        w = f"(DATE(t.transaction_at) BETWEEN ? AND ? OR t.id IN ({ph}))"
+        w_plain = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
     else:
-        w = "t.transaction_at BETWEEN ? AND ?"
-        w_plain = "transaction_at BETWEEN ? AND ?"
+        w = "DATE(t.transaction_at) BETWEEN ? AND ?"
+        w_plain = "DATE(transaction_at) BETWEEN ? AND ?"
     p = [start_str, end_str] + ids
 
     top_merchants = conn.execute(f"""
@@ -195,7 +195,7 @@ def dashboard_merchants():
             FROM transactions
             WHERE direction = 'outflow'
               AND merchant_raw = ?
-              AND transaction_at BETWEEN ? AND ?
+              AND DATE(transaction_at) BETWEEN ? AND ?
             ORDER BY transaction_at DESC
         """, (m["merchant_raw"], start_str, end_str)).fetchall()
         merchant_list.append({
@@ -269,9 +269,9 @@ def dashboard_comparison():
     ids = pinned_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
-        cur_join = f"(t.transaction_at BETWEEN ? AND ? OR t.id IN ({ph}))"
+        cur_join = f"(DATE(t.transaction_at) BETWEEN ? AND ? OR t.id IN ({ph}))"
     else:
-        cur_join = "t.transaction_at BETWEEN ? AND ?"
+        cur_join = "DATE(t.transaction_at) BETWEEN ? AND ?"
     cur_p = [start_str, end_str] + ids
 
     cur_cats = conn.execute(f"""
@@ -286,7 +286,7 @@ def dashboard_comparison():
                COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS spent
         FROM categories c
         LEFT JOIN transactions t ON t.category_id=c.id
-            AND t.transaction_at BETWEEN ? AND ?
+            AND DATE(t.transaction_at) BETWEEN ? AND ?
         GROUP BY c.id
     """, (prev_start.isoformat(), prev_end.isoformat())).fetchall()
 

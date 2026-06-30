@@ -13,9 +13,13 @@ async function request(method, path, body = null) {
 
   const json = await res.json();
   if (res.status === 401) {
+    const hadToken = !!localStorage.getItem(TOKEN_KEY);
     localStorage.removeItem(TOKEN_KEY);
-    window.location.href = "/login";
-    return;
+    if (hadToken) {
+      window.location.href = "/login";
+      return;
+    }
+    throw new Error(json.error || "Invalid credentials");
   }
   if (!res.ok) throw new Error(json.error || "Request failed");
   return json.data;

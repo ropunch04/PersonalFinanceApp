@@ -1,3 +1,5 @@
+import imaplib
+
 from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
@@ -25,6 +27,15 @@ def save_gmail():
 
     if not gmail_address or not app_password:
         return _err("gmail_address and app_password are required", 400)
+
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+        mail.login(gmail_address, app_password)
+        mail.logout()
+    except imaplib.IMAP4.error:
+        return _err("Invalid Gmail address or app password — please check and try again", 400)
+    except Exception:
+        return _err("Could not connect to Gmail — check your internet connection and try again", 400)
 
     encrypted = encrypt(app_password)
     conn = get_user_db(g.current_user["user_id"])

@@ -35,6 +35,17 @@ function fmtDate(s) {
   return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function zelleLabel(notes, expanded = false) {
+  if (!notes?.startsWith("zelle:")) return null;
+  const rest = notes.slice(6);
+  if (rest.startsWith("received:")) {
+    const person = rest.slice(9).trim();
+    return expanded ? `Received from ${person} via Zelle` : `From ${person}`;
+  }
+  const person = rest.startsWith("sent:") ? rest.slice(5).trim() : rest.trim();
+  return expanded ? `Sent to ${person} via Zelle` : `To ${person}`;
+}
+
 function venmoLabel(notes, direction, expanded = false) {
   if (!notes?.startsWith("venmo:")) return null;
   const rest = notes.slice(6);
@@ -950,6 +961,11 @@ export default function Transactions() {
                             · {venmoLabel(t.notes, t.direction)}
                           </span>
                         )}
+                        {t.notes?.startsWith("zelle:") && (
+                          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)", marginLeft: 6 }}>
+                            · {zelleLabel(t.notes)}
+                          </span>
+                        )}
                       </div>
                       <div className="txn-row-sub">
                         {fmtDate(t.transaction_at)}
@@ -1041,13 +1057,15 @@ export default function Transactions() {
                       ) : (
                         <>
                           <dl className="txn-meta">
-                            {t.notes && !t.notes.startsWith("venmo") && (
+                            {t.notes && !t.notes.startsWith("venmo") && !t.notes.startsWith("zelle") && (
                               <><dt className="txn-meta-key">Notes</dt><dd className="txn-meta-val">{t.notes}</dd></>
                             )}
                             <dt className="txn-meta-key">Type</dt>
                             <dd className="txn-meta-val">
                               {t.notes?.startsWith("venmo")
                                 ? `Venmo · ${venmoLabel(t.notes, t.direction, true)}`
+                                : t.notes?.startsWith("zelle")
+                                ? `Zelle · ${zelleLabel(t.notes, true)}`
                                 : t.direction === "inflow" ? "Credit" : "Debit"}
                             </dd>
                             {t.reimburses_id && (
