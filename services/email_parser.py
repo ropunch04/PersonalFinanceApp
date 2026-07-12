@@ -53,6 +53,8 @@ _VENMO_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE | re.MULTILINE)
 _VENMO_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
 _VENMO_CHARGER = re.compile(r"^(.+?) charged you", re.IGNORECASE | re.MULTILINE)
 
+_AMEX_MERCHANT_COLOR = "color:#006fcf"
+
 
 def _source_hash(provider: str, message_id: str) -> str:
     raw = f"{provider}|{message_id}"
@@ -96,6 +98,27 @@ def _get_venmo_memo(msg: Message) -> str | None:
         note = soup.find(class_="transaction-note")
         if note:
             return note.get_text(strip=True) or None
+    return None
+
+
+def _get_amex_merchant(msg: Message) -> str | None:
+    for part in msg.walk():
+        if part.get_content_type() != "text/html":
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        html = payload.decode(charset, errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
+        for div in soup.find_all("div", style=True):
+            style = div["style"].replace(" ", "").lower()
+            if _AMEX_MERCHANT_COLOR in style and "font-weight:bold" in style:
+                text = div.get_text(strip=True)
+                if text:
+                    return text
     return None
 
 
@@ -231,6 +254,31 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
     }
 
 
+def _parse_amex_email(msg: Message, message_id: str, conn) -> dict | None:
+    subject = msg.get("Subject", "")
+    if not re.search(r"large purchase", subject, re.IGNORECASE):
+        return None
+
+    text = _get_text(msg)
+
+    amount_m = _CAP1_AMOUNT.search(text)
+    if not amount_m:
+        return None
+    amount = float(amount_m.group(1).replace(",", ""))
+
+    merchant_raw = _get_amex_merchant(msg) or "Unknown Merchant"
+
+    return {
+        "amount": amount,
+        "direction": "outflow",
+        "merchant_raw": merchant_raw,
+        "category_id": _get_category_id(conn, merchant_raw) if conn else None,
+        "transaction_at": _parse_cap1_date(text),
+        "source_hash": _source_hash("amex_purchase", message_id),
+        "notes": None,
+    }
+
+
 def _parse_zelle_email(msg: Message, message_id: str, conn) -> dict | None:
     subject = msg.get("Subject", "")
     if not re.search(r"zelle", subject, re.IGNORECASE):
@@ -298,6 +346,7 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
             (b'FROM "capitalone.com" SUBJECT "credit"', None),
             (b'FROM "capitalone.com" SUBJECT "Zelle"', _parse_zelle_email),
             (b'FROM "venmo@venmo.com"', _parse_venmo_email),
+            (b'FROM "americanexpress.com" SUBJECT "Large Purchase Approved"', _parse_amex_email),
         ]
 
         for criteria, fixed_parser in searches:
