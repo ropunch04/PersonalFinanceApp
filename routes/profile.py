@@ -25,7 +25,7 @@ def _fetch_profile(conn) -> dict:
         SELECT b.category_id, c.name AS category_name, b.amount, b.period
         FROM budgets b
         JOIN categories c ON c.id = b.category_id
-        ORDER BY c.name
+        ORDER BY c.sort_order, c.id
         """
     ).fetchall()
     return {

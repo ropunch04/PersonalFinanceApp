@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useOnline } from "../context/OnlineContext";
 import { useDashboardFilters, RANGES } from "../hooks/useDashboardFilters";
+import { useDashboardWidgets } from "../hooks/useDashboardWidgets";
 import { usePwaSync } from "../hooks/usePwaSync";
-import CategoryBreakdown from "../components/CategoryBreakdown";
 import CategoryDonut from "../components/CategoryDonut";
+import BudgetByCategoryWidget from "../components/BudgetByCategoryWidget";
 import SpendingTrendChart from "../components/SpendingTrendChart";
 import MerchantInsights from "../components/MerchantInsights";
 import ComparisonCard from "../components/ComparisonCard";
@@ -93,6 +94,7 @@ export default function Dashboard({ onQueueChange }) {
   const [syncError, setSyncError] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [showPinPicker, setShowPinPicker] = useState(false);
+  const [showWidgetConfig, setShowWidgetConfig] = useState(false);
   const navigate = useNavigate();
   const { isOnline } = useOnline();
   const {
@@ -102,6 +104,8 @@ export default function Dashboard({ onQueueChange }) {
     pinnedIds, togglePin, clearPins,
     dateParams,
   } = useDashboardFilters();
+  const { widgets, order: widgetOrder, hidden: hiddenWidgets, visibleOrder, toggleWidget, moveWidget } =
+    useDashboardWidgets();
 
   const allParams = pinnedIds.length
     ? { ...dateParams, include_ids: pinnedIds.join(",") }
@@ -193,19 +197,75 @@ export default function Dashboard({ onQueueChange }) {
             />
           </div>
 
-          {(pending_count ?? 0) > 0 && (
+          <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "flex-start" }}>
+            {(pending_count ?? 0) > 0 && (
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: "var(--red)", color: "#fff", border: "none",
+                  fontWeight: 700, flexShrink: 0,
+                }}
+                onClick={() => navigate("/transactions?status=pending")}
+              >
+                {pending_count} to review
+              </button>
+            )}
             <button
-              className="btn btn-sm"
-              style={{
-                background: "var(--red)", color: "#fff", border: "none",
-                fontWeight: 700, flexShrink: 0,
-              }}
-              onClick={() => navigate("/transactions?status=pending")}
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowWidgetConfig((v) => !v)}
             >
-              {pending_count} to review
+              {showWidgetConfig ? "Done" : "Widgets"}
             </button>
-          )}
+          </div>
         </div>
+
+        {showWidgetConfig && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <p className="section-label" style={{ marginBottom: 10 }}>Customize Widgets</p>
+            <div className="budget-list">
+              {widgetOrder.map((key, i) => {
+                const widget = widgets.find((w) => w.key === key);
+                const isHidden = hiddenWidgets.includes(key);
+                return (
+                  <div className="budget-row" key={key} style={{ alignItems: "center", gap: 8 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={!isHidden}
+                        onChange={() => toggleWidget(key)}
+                      />
+                      <span style={{ color: isHidden ? "var(--text-muted)" : "var(--text)" }}>
+                        {widget?.label ?? key}
+                      </span>
+                    </label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => moveWidget(key, -1)}
+                        disabled={i === 0}
+                        title="Move up"
+                        style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => moveWidget(key, 1)}
+                        disabled={i === widgetOrder.length - 1}
+                        title="Move down"
+                        style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                      >
+                        ▼
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="range-pills">
           {RANGES.map((r) => (
@@ -269,22 +329,36 @@ export default function Dashboard({ onQueueChange }) {
           </div>
         </div>
 
-        <ComparisonCard dateParams={allParams} />
-
-        <SpendingTrendChart dateParams={allParams} />
-
-        <CategoryDonut
-          categories={by_category}
-          selectedId={selectedCategoryId}
-          onSelect={setSelectedCategoryId}
-        />
-        <CategoryBreakdown
-          categories={by_category}
-          selectedId={selectedCategoryId}
-          dateParams={dateParams}
-        />
-
-        <MerchantInsights dateParams={allParams} />
+        {visibleOrder.map((key) => {
+          switch (key) {
+            case "comparison":
+              return <ComparisonCard key={key} dateParams={allParams} />;
+            case "trend":
+              return <SpendingTrendChart key={key} dateParams={allParams} />;
+            case "donut":
+              return (
+                <CategoryDonut
+                  key={key}
+                  categories={by_category}
+                  selectedId={selectedCategoryId}
+                  onSelect={setSelectedCategoryId}
+                />
+              );
+            case "budget":
+              return (
+                <BudgetByCategoryWidget
+                  key={key}
+                  categories={by_category}
+                  selectedId={selectedCategoryId}
+                  dateParams={dateParams}
+                />
+              );
+            case "merchants":
+              return <MerchantInsights key={key} dateParams={allParams} />;
+            default:
+              return null;
+          }
+        })}
       </div>
 
       {showPinPicker && (

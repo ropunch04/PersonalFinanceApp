@@ -51,6 +51,13 @@ export default function Profile({ setup = false }) {
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState(null);
 
+  const [editingCategories, setEditingCategories] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryMsg, setCategoryMsg] = useState(null);
+  const [deletingCategoryId, setDeletingCategoryId] = useState(null);
+  const [movingCategory, setMovingCategory] = useState(false);
+
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [savingGmail, setSavingGmail] = useState(false);
@@ -95,6 +102,58 @@ export default function Profile({ setup = false }) {
       setBudgetMsg(`Error: ${err.message}`);
     } finally {
       setSavingBudget(false);
+    }
+  }
+
+  async function handleAddCategory(e) {
+    e.preventDefault();
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setAddingCategory(true);
+    setCategoryMsg(null);
+    try {
+      const category = await api.createCategory(name);
+      setBudgets((prev) => [
+        ...prev,
+        { category_id: category.id, category_name: category.name, amount: 0, period: "monthly" },
+      ]);
+      setNewCategoryName("");
+    } catch (err) {
+      setCategoryMsg(`Error: ${err.message}`);
+    } finally {
+      setAddingCategory(false);
+    }
+  }
+
+  async function handleDeleteCategory(categoryId) {
+    setDeletingCategoryId(categoryId);
+    setCategoryMsg(null);
+    try {
+      await api.deleteCategory(categoryId);
+      setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
+    } catch (err) {
+      setCategoryMsg(`Error: ${err.message}`);
+    } finally {
+      setDeletingCategoryId(null);
+    }
+  }
+
+  async function handleMoveCategory(index, direction) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= budgets.length || movingCategory) return;
+
+    const reordered = [...budgets];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    setBudgets(reordered);
+    setMovingCategory(true);
+    setCategoryMsg(null);
+    try {
+      await api.reorderCategories(reordered.map((b) => b.category_id));
+    } catch (err) {
+      setBudgets(budgets);
+      setCategoryMsg(`Error: ${err.message}`);
+    } finally {
+      setMovingCategory(false);
     }
   }
 
@@ -178,12 +237,50 @@ export default function Profile({ setup = false }) {
         <div className="card">
           <form onSubmit={handleSaveBudget}>
             <div className="form-stack">
-              {budgets.length > 0 && (
-                <div>
-                  <p className="field-label" style={{ marginBottom: 8 }}>Category Budgets</p>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <p className="field-label" style={{ marginBottom: 0 }}>Category Budgets</p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setEditingCategories((v) => !v);
+                      setCategoryMsg(null);
+                      setNewCategoryName("");
+                    }}
+                  >
+                    {editingCategories ? "Done" : "Edit"}
+                  </button>
+                </div>
+
+                {budgets.length > 0 && (
                   <div className="budget-list">
                     {budgets.map((b, i) => (
                       <div className="budget-row" key={b.category_id} style={{ alignItems: "center", gap: 8 }}>
+                        {editingCategories && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleMoveCategory(i, -1)}
+                              disabled={i === 0 || movingCategory}
+                              title="Move up"
+                              style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleMoveCategory(i, 1)}
+                              disabled={i === budgets.length - 1 || movingCategory}
+                              title="Move down"
+                              style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        )}
                         <span className="budget-cat">{b.category_name}</span>
                         <input
                           type="text"
@@ -227,11 +324,52 @@ export default function Profile({ setup = false }) {
                             </button>
                           ))}
                         </div>
+                        {editingCategories && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleDeleteCategory(b.category_id)}
+                            disabled={deletingCategoryId === b.category_id}
+                            title="Remove category"
+                            style={{ flexShrink: 0, padding: "0 10px" }}
+                          >
+                            {deletingCategoryId === b.category_id ? "…" : "Remove"}
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+
+                {editingCategories && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="New category name"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddCategory(e);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleAddCategory}
+                      disabled={addingCategory || !newCategoryName.trim()}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {addingCategory ? "Adding…" : "+ Add Category"}
+                    </button>
+                  </div>
+                )}
+
+                {categoryMsg && (
+                  <div className={`msg ${categoryMsg.startsWith("Error") ? "msg-error" : "msg-success"}`} style={{ marginTop: 8 }}>
+                    {categoryMsg}
+                  </div>
+                )}
+              </div>
 
               {budgetMsg && (
                 <div className={`msg ${budgetMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>

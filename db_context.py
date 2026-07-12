@@ -18,8 +18,9 @@ _DEFAULT_CATEGORIES = [
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS categories (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    name  TEXT NOT NULL UNIQUE
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -66,6 +67,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except Exception:
         pass  # column already exists
 
+    try:
+        conn.execute("ALTER TABLE categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()
+    distinct_orders = conn.execute("SELECT COUNT(DISTINCT sort_order) AS n FROM categories").fetchone()["n"]
+    if len(rows) > 1 and distinct_orders <= 1:
+        for index, row in enumerate(rows):
+            conn.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (index, row["id"]))
+        conn.commit()
+
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
     if "user_db" not in g:
@@ -88,8 +102,8 @@ def init_user_db(user_id: int) -> None:
         conn.executescript(_SCHEMA)
         now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
-            "INSERT OR IGNORE INTO categories (name) VALUES (?)",
-            [(name,) for name in _DEFAULT_CATEGORIES],
+            "INSERT OR IGNORE INTO categories (name, sort_order) VALUES (?, ?)",
+            [(name, i) for i, name in enumerate(_DEFAULT_CATEGORIES)],
         )
         conn.execute(
             "INSERT OR IGNORE INTO profile (id, created_at, updated_at) VALUES (1, ?, ?)",

@@ -442,6 +442,15 @@ select {
   cursor: pointer;
 }
 
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  flex-shrink: 0;
+  appearance: auto;
+  cursor: pointer;
+}
+
 input::placeholder {
   color: var(--text-muted);
 }

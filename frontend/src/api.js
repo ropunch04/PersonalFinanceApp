@@ -93,6 +93,9 @@ export const api = {
 
   getCategories: () => request("GET", "/api/categories"),
   categories: () => request("GET", "/api/categories"),
+  createCategory: (name) => request("POST", "/api/categories", { name }),
+  deleteCategory: (id) => request("DELETE", `/api/categories/${id}`),
+  reorderCategories: (order) => request("PUT", "/api/categories/reorder", { order }),
 
   queue: () => request("GET", "/api/queue"),
   confirm: (id, data) => request("PUT", `/api/transactions/${id}`, { ...data, status: "confirmed" }),
