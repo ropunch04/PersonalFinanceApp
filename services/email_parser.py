@@ -53,12 +53,8 @@ _VENMO_FROM = re.compile(r"^(.+?) paid you", re.IGNORECASE | re.MULTILINE)
 _VENMO_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
 _VENMO_CHARGER = re.compile(r"^(.+?) charged you", re.IGNORECASE | re.MULTILINE)
 
-_AMEX_TXN = re.compile(
-    r"^([A-Z][A-Z0-9&'.\-]*(?:\s[A-Z0-9&'.\-]+)*)\s*\n\s*\n\s*"
-    r"\$\s*([\d,]+\.\d{2})\*?\s*\n\s*\n\s*"
-    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*\w+\.?\s*\d{1,2},?\s*\d{4}",
-    re.MULTILINE,
-)
+_AMEX_MERCHANT_COLOR = "color:#006fcf"
+_AMEX_AMOUNT_COLOR = "color:#333333"
 
 
 def _source_hash(provider: str, message_id: str) -> str:
@@ -104,6 +100,39 @@ def _get_venmo_memo(msg: Message) -> str | None:
         if note:
             return note.get_text(strip=True) or None
     return None
+
+
+def _get_amex_styled_text(msg: Message, color: str) -> str | None:
+    for part in msg.walk():
+        if part.get_content_type() != "text/html":
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        html = payload.decode(charset, errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
+        for div in soup.find_all("div", style=True):
+            style = div["style"].replace(" ", "").lower()
+            if color in style and "font-weight:bold" in style:
+                text = div.get_text(strip=True)
+                if text:
+                    return text
+    return None
+
+
+def _get_amex_merchant(msg: Message) -> str | None:
+    return _get_amex_styled_text(msg, _AMEX_MERCHANT_COLOR)
+
+
+def _get_amex_amount(msg: Message) -> float | None:
+    text = _get_amex_styled_text(msg, _AMEX_AMOUNT_COLOR)
+    if not text:
+        return None
+    amount_m = _CAP1_AMOUNT.search(text)
+    return float(amount_m.group(1).replace(",", "")) if amount_m else None
 
 
 def _parse_cap1_date(text: str) -> str:
@@ -245,11 +274,10 @@ def _parse_amex_email(msg: Message, message_id: str, conn) -> dict | None:
 
     text = _get_text(msg)
 
-    txn_m = _AMEX_TXN.search(text)
-    if not txn_m:
+    amount = _get_amex_amount(msg)
+    if amount is None:
         return None
-    merchant_raw = txn_m.group(1).strip()
-    amount = float(txn_m.group(2).replace(",", ""))
+    merchant_raw = _get_amex_merchant(msg) or "Unknown Merchant"
 
     return {
         "amount": amount,
