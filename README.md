@@ -1,8 +1,8 @@
-# DO NOT MERGE TO MAIN!!
+# Personal Finance App (Kyle's fork)
 
-# Personal Finance App
+A self-hosted personal finance tracker with a Flask/SQLite backend and a React 19 frontend. This is my personal fork — it runs on my own Linux box at home and is exposed at `budget.kotero.dev` via a Cloudflare Tunnel. Transactions are imported from Capital One, Amex, or Venmo CSV/email, or synced automatically from Gmail.
 
-A self-hosted personal finance tracker with a Flask/SQLite backend and a React 19 frontend. Designed to run on a Raspberry Pi (or any Linux box) and optionally exposed via Cloudflare Tunnel. Transactions can be imported from Capital One or Venmo CSV exports, or synced automatically from Gmail.
+This fork tracks its own history independently of any upstream repo — I don't merge changes from elsewhere into it, and I don't expect it to be merged anywhere. `scripts/manage.sh` (see [Setup & Management Script](#setup--management-script)) is the one command you need for setup, running, and day-to-day upkeep.
 
 ---
 
@@ -10,16 +10,17 @@ A self-hosted personal finance tracker with a Flask/SQLite backend and a React 1
 
 1. [Architecture Overview](#architecture-overview)
 2. [Prerequisites](#prerequisites)
-3. [Local Development Setup](#local-development-setup)
-4. [Environment Variables](#environment-variables)
-5. [Database Architecture](#database-architecture)
-6. [API Reference](#api-reference)
-7. [Authentication & Security](#authentication--security)
-8. [Gmail Sync](#gmail-sync)
-9. [Frontend Structure](#frontend-structure)
-10. [Production Deployment (Raspberry Pi)](#production-deployment-raspberry-pi)
-11. [GitHub & SQLite — What to Commit](#github--sqlite--what-to-commit)
-12. [Linting & Formatting](#linting--formatting)
+3. [Setup & Management Script](#setup--management-script)
+4. [Local Development Setup (manual)](#local-development-setup-manual)
+5. [Environment Variables](#environment-variables)
+6. [Database Architecture](#database-architecture)
+7. [API Reference](#api-reference)
+8. [Authentication & Security](#authentication--security)
+9. [Gmail Sync](#gmail-sync)
+10. [Frontend Structure](#frontend-structure)
+11. [Production Deployment](#production-deployment)
+12. [GitHub & SQLite — What to Commit](#github--sqlite--what-to-commit)
+13. [Linting & Formatting](#linting--formatting)
 
 ---
 
@@ -66,16 +67,61 @@ No external database server required — SQLite is bundled with Python.
 
 ---
 
-## Local Development Setup
+## Setup & Management Script
 
-### 1. Clone and enter the repo
+`scripts/manage.sh` is a single entry point for everything below — first-time install, running it day to day, and ongoing upkeep. It detects whether it's on my Linux host (systemd + cloudflared present) or a plain dev machine (Mac) and adjusts what it does accordingly.
 
 ```bash
-git clone <repo-url>
-cd PersonalFinanceApp
+./scripts/manage.sh help
 ```
 
-### 2. Backend
+```
+Setup
+  setup                     Create venv, install deps, build frontend, write .env
+  install-service           (sudo, Linux) Install/enable the systemd units
+
+Run
+  dev                       Run Flask + Vite dev servers locally
+  start / stop / restart    Control the finance-app systemd service
+  status                    Show finance-app (and cloudflared, if installed) status
+  logs                      Follow app logs (journalctl in prod, logs/app.log in dev)
+  tunnel {start|stop|restart|status|logs}
+                             Control the cloudflared systemd service
+
+Maintain
+  update                    git pull, reinstall deps, rebuild frontend, restart
+  backup                    Snapshot all data/*.db files to data/backups/<timestamp>/
+  create-user <user> <email> [--admin]
+                             Create an account (owner-only, no public registration)
+  set-password <user>       Reset a user's password
+```
+
+**First time on a fresh checkout (dev machine or the Linux host):**
+
+```bash
+./scripts/manage.sh setup
+./scripts/manage.sh create-user <username> <email> --admin
+```
+
+- On a Mac/dev machine, `setup` writes a local `.env` (dev secrets, `DEBUG=true`) and you're done — run `./scripts/manage.sh dev` to start both Flask and Vite.
+- On the Linux host, `setup` builds `.env` from `deploy/env.production` with freshly generated `SECRET_KEY`/`ENCRYPTION_KEY` (you still need to set `ALLOWED_ORIGIN`), then you run `sudo ./scripts/manage.sh install-service` once to register the `finance-app` and `cloudflared` systemd units, and `./scripts/manage.sh start`.
+
+**Day to day on the host:**
+
+```bash
+./scripts/manage.sh status         # is it up?
+./scripts/manage.sh logs           # tail logs
+./scripts/manage.sh update         # pull latest, reinstall deps, rebuild, restart
+./scripts/manage.sh backup         # snapshot the SQLite DBs before anything risky
+```
+
+---
+
+## Local Development Setup (manual)
+
+The steps below are what `./scripts/manage.sh setup` + `./scripts/manage.sh dev` do for you — useful if you want to run a step by hand or understand what's happening.
+
+### 1. Backend
 
 ```bash
 # Create and activate a virtual environment
@@ -86,15 +132,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Create your `.env` file
-
-Copy the example and fill in the two required secrets (see [Environment Variables](#environment-variables)):
-
-```bash
-cp deploy/env.production .env
-```
-
-Minimal `.env` for local dev:
+### 2. Create your `.env` file
 
 ```env
 SECRET_KEY=<at-least-64-hex-chars>
@@ -115,7 +153,7 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-### 4. Run the backend
+### 3. Run the backend
 
 ```bash
 python app.py
@@ -124,7 +162,7 @@ python app.py
 
 The `data/` directory and both SQLite databases are created automatically on first run.
 
-### 5. Frontend
+### 4. Frontend
 
 ```bash
 cd frontend
@@ -134,9 +172,13 @@ npm run dev
 # /api/* requests are proxied to localhost:5100 by Vite
 ```
 
-### 6. Register your first account
+### 5. Create your account
 
-Open `http://localhost:5173` and register. By default `REGISTRATION_ENABLED` is not set so registration is open in dev. Set `REGISTRATION_ENABLED=false` in production after creating your account.
+There's no public registration form — accounts are created from the shell:
+
+```bash
+./scripts/manage.sh create-user <username> <email> --admin
+```
 
 ---
 
@@ -152,7 +194,6 @@ All variables are loaded from `.env` via `python-dotenv`. `config.py` validates 
 | `ALLOWED_ORIGIN` | Yes | Frontend origin for CORS. `http://localhost:5173` in dev; your public URL in prod. |
 | `DB_PATH` | No | Path for `master.db`. Defaults to `data/finance.db` (the `master.db` is placed in the same directory). |
 | `RUN_SCHEDULER` | No | Set `true` to run APScheduler inside Flask (dev/single-process only). Leave `false` in production — gunicorn starts the scheduler via its `on_starting` hook instead. |
-| `REGISTRATION_ENABLED` | No | Any value other than `false` allows new registrations. Omit or set `false` in production. |
 | `LOG_FILE` | No | Defaults to `logs/app.log`. |
 
 > **Critical:** `ENCRYPTION_KEY` is tied to the machine where Gmail credentials were saved. If you move to a new machine with a different key, re-enter Gmail credentials through the app so they get re-encrypted with the new key.
@@ -172,11 +213,11 @@ Passwords are hashed with bcrypt. This DB is never exposed to the frontend direc
 ### `data/user_{id}_finance.db` — per-user data
 
 ```sql
-categories   (id, name)
+categories   (id, name, sort_order, is_misc)
 transactions (id, amount, merchant_raw, direction, category_id, notes,
               transaction_at, created_at, source_hash, reimburses_id)
 profile      (id=1, gmail_address, gmail_app_password_enc, last_synced_at, ...)
-budgets      (id, category_id, amount)
+budgets      (id, category_id, amount, period, fold_into_misc)
 ```
 
 **Key fields:**
@@ -184,6 +225,8 @@ budgets      (id, category_id, amount)
 - `direction` — `"inflow"` (money received) or `"outflow"` (money spent).
 - `source_hash` — SHA hash of the raw email/CSV row, used as a dedup key (`UNIQUE` constraint). Reimporting the same CSV will not create duplicates.
 - `reimburses_id` — FK pointing to an outflow transaction that this inflow reimburses. Enables the net-cost calculation. Multiple inflows can point to the same outflow (partial reimbursements).
+- `categories.is_misc` — at most one category is flagged as the Misc/Flex bucket. Any other category's spend that exceeds its own budget, plus the full spend of any category with `fold_into_misc` set, rolls into this category's total instead of just going negative. Set via `PUT /api/categories/<id>/misc` or the "Set Misc" control in Profile.
+- `budgets.fold_into_misc` — when set, that category's entire spend (not just the overflow) counts toward Misc, effectively giving the category a $0 budget of its own.
 
 All connections use `PRAGMA journal_mode=WAL` for concurrent read safety and `PRAGMA foreign_keys=ON`.
 
@@ -197,13 +240,13 @@ All routes are prefixed `/api/`. Every route except auth requires `Authorization
 
 ### Auth — `/api/auth`
 
+There is intentionally no `/api/auth/register` route — accounts are created owner-side via `./scripts/manage.sh create-user` (see [Setup & Management Script](#setup--management-script)).
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/auth/register` | Create account. Body: `{username, email, password}` |
-| `POST` | `/api/auth/login` | Returns `{token, user}`. Token TTL: 7 days. |
+| `POST` | `/api/auth/login` | Returns `{token, user}`. Token TTL: 7 days. Rate-limited: 20/min, 100/hr. |
+| `POST` | `/api/auth/change-password` | Body: `{current_password, new_password}`. Rate-limited: 10/hr. |
 | `GET` | `/api/auth/me` | Current user info. |
-| `PUT` | `/api/auth/me` | Update username/email. |
-| `PUT` | `/api/auth/me/password` | Change password. |
 
 ### Transactions — `/api/transactions`
 
@@ -242,11 +285,11 @@ All dashboard endpoints accept `start_date`, `end_date`, and `include_ids` query
 
 ### Categories — `/api/categories`
 
-CRUD for categories. `GET /api/categories/unclassified-merchants` returns merchants with uncategorized transactions for bulk-classify workflow.
+CRUD for categories, plus `PUT /api/categories/reorder` and `PUT /api/categories/<id>/misc` (`{is_misc: true|false}`) to designate the Misc/Flex bucket — see [Database Architecture](#database-architecture). `GET /api/transactions/merchants/unclassified` returns merchants with uncategorized transactions for the bulk-classify workflow.
 
 ### Import — `/api/import`
 
-`POST /api/import/csv` — multipart form upload. Accepts Capital One or Venmo CSV files. Field: `source` (`capitalone` | `venmo`), `file` (one or more CSVs).
+`POST /api/import/transactions` — multipart form upload. Fields: `source_type` (`capitalone` | `venmo` | `amex`), `file` (one or more files). Returns `{imported, duplicates_skipped, errors}`.
 
 ### Sync — `/api/sync`
 
@@ -280,7 +323,7 @@ CRUD for categories. `GET /api/categories/unclassified-merchants` returns mercha
 
 ## Gmail Sync
 
-The app can read Capital One and Venmo transaction notification emails directly from a Gmail inbox using IMAP.
+The app can read Capital One, Amex, and Venmo transaction notification emails directly from a Gmail inbox using IMAP (Capital One Zelle transfers too).
 
 **Setup (per user):**
 1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) on the Gmail account.
@@ -292,7 +335,7 @@ The app can read Capital One and Venmo transaction notification emails directly 
 
 **Manual sync:** Available via the sync button on the Home page (calls `POST /api/sync/now`).
 
-**Email parsing:** `services/email_parser.py` uses BeautifulSoup to parse HTML emails from Capital One and Venmo. Each parsed transaction gets a `source_hash` derived from the raw email content — re-syncing the same emails will not create duplicates.
+**Email parsing:** `services/email_parser.py` uses BeautifulSoup to parse HTML emails from Capital One, Amex, and Venmo. Each parsed transaction gets a `source_hash` derived from the raw email content — re-syncing the same emails will not create duplicates.
 
 ---
 
@@ -307,7 +350,7 @@ frontend/src/
 │   ├── Transactions.jsx      # Full transaction list with filters, sort, pagination
 │   ├── Profile.jsx           # Category budgets, Gmail credentials, account settings
 │   ├── GmailSetup.jsx        # Gmail IMAP setup instructions
-│   ├── Login.jsx / Register.jsx
+│   ├── Login.jsx
 │   ├── Import.jsx            # CSV import UI
 │   └── Admin.jsx             # User management (admin only)
 ├── components/
@@ -342,146 +385,74 @@ frontend/src/
 
 ---
 
-## Production Deployment (Raspberry Pi)
+## Production Deployment
 
-### 1. Rsync the project to the Pi
+Runs on my home Linux box at `/home/kyleotero/projects/PersonalFinanceApp`, exposed at `https://budget.kotero.dev` via a Cloudflare Tunnel (no ports forwarded on the router). `./scripts/manage.sh` wraps everything below.
 
-Run this **on your Mac**, not the Pi:
-
-```bash
-rsync -avz --exclude='.env' --exclude='venv/' --exclude='frontend/node_modules/' \
-      --exclude='frontend/dist/' --exclude='data/' --exclude='logs/' \
-      --exclude='__pycache__/' \
-      /path/to/PersonalFinanceApp/ rohitpras@<pi-ip>:~/PersonalFinanceApp/
-```
-
-### 2. On the Pi — first-time setup
+### 1. First-time setup on the host
 
 ```bash
-cd ~/PersonalFinanceApp
-
-# Python environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Node / frontend build
-cd frontend
-npm install
-npm run build
-cd ..
-
-# Create production .env from the template
-cp deploy/env.production .env
-# Edit .env — fill in SECRET_KEY, ENCRYPTION_KEY, ALLOWED_ORIGIN
-nano .env
-
-# Create required directories
-mkdir -p data logs
+git clone https://github.com/kyleotero/PersonalFinanceApp.git ~/projects/PersonalFinanceApp
+cd ~/projects/PersonalFinanceApp
+./scripts/manage.sh setup
+# edit .env — set ALLOWED_ORIGIN=https://budget.kotero.dev
 ```
 
-### 3. Install systemd service
+### 2. Cloudflare Tunnel
 
 ```bash
-sudo cp deploy/finance-app.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable finance-app
-sudo systemctl start finance-app
+cloudflared tunnel create budget
+# prints a Tunnel ID and writes ~/.cloudflared/<TUNNEL_ID>.json
 
-# Check status
-sudo systemctl status finance-app
-sudo journalctl -u finance-app -f
+cp deploy/cloudflared-config.yml ~/.cloudflared/config.yml
+# edit config.yml — set the tunnel id + credentials-file path to match what was just created
+
+cloudflared tunnel route dns budget budget.kotero.dev
 ```
 
-The service runs gunicorn on `0.0.0.0:5100`. The app is accessible at `http://<pi-ip>:5100` on your local network.
-
-### 4. Deploying updates
-
-Run all three commands **from your Mac**. The `data/` and `.env` excludes mean user databases and secrets are never touched, regardless of what changed in the codebase.
+### 3. Install and start the systemd services
 
 ```bash
-# Step 1 — sync code to the Pi (safe to run anytime; never overwrites data/ or .env)
-rsync -avz \
-  --exclude='.env' \
-  --exclude='venv/' \
-  --exclude='frontend/node_modules/' \
-  --exclude='frontend/dist/' \
-  --exclude='data/' \
-  --exclude='logs/' \
-  --exclude='__pycache__/' \
-  /path/to/PersonalFinanceApp/ rohitpras@<pi-ip>:~/PersonalFinanceApp/
-
-# Step 2 — rebuild the frontend (only needed if you changed any frontend code)
-ssh rohitpras@<pi-ip> "cd ~/PersonalFinanceApp/frontend && npm run build"
-
-# Step 3 — restart the service to pick up backend changes
-ssh rohitpras@<pi-ip> "sudo systemctl restart finance-app"
+sudo ./scripts/manage.sh install-service   # installs + enables finance-app and cloudflared units
+./scripts/manage.sh start
+./scripts/manage.sh status
 ```
 
-**What rsync never touches on the Pi:**
+Gunicorn binds `127.0.0.1:5100` (see `gunicorn.conf.py`) — it's only reachable through the tunnel, not directly on the LAN.
 
-| Path | Why it's excluded |
-|------|-------------------|
-| `data/` | All SQLite databases — master + every user's finance DB |
-| `.env` | Production secret keys |
-| `logs/` | Runtime log files |
-| `venv/` | Python environment (already installed) |
-| `frontend/node_modules/` | npm packages (already installed) |
-| `frontend/dist/` | Built assets — rebuilt separately in step 2 |
-
-**Backend-only change** (no frontend edits): skip step 2, just steps 1 and 3.
-
-**Frontend-only change**: all three steps — rsync delivers the source, step 2 rebuilds the bundle, step 3 restarts so Flask serves the new `dist/`.
-
-**New Python dependency added** (`requirements.txt` changed): after step 1, run:
+### 4. Create your account
 
 ```bash
-ssh rohitpras@<pi-ip> "cd ~/PersonalFinanceApp && source venv/bin/activate && pip install -r requirements.txt"
+./scripts/manage.sh create-user <username> <email> --admin
 ```
 
-Then proceed to step 3.
+### 5. Deploying updates
+
+```bash
+./scripts/manage.sh update
+```
+
+This runs `git pull --ff-only`, reinstalls Python/npm dependencies, rebuilds the frontend, and restarts `finance-app`. `data/`, `.env`, and `logs/` are never touched by any of this — they aren't tracked by git (see [What to Commit](#github--sqlite--what-to-commit)) and nothing in `update` writes to them.
+
+Before anything that touches the schema or feels risky:
+
+```bash
+./scripts/manage.sh backup
+```
 
 #### Schema migrations
 
-The schema uses `CREATE TABLE IF NOT EXISTS`, so **new tables** are created automatically on the next restart. However, **new columns on existing tables** are not — you must run `ALTER TABLE` manually on the Pi for each affected database.
+The schema uses `CREATE TABLE IF NOT EXISTS` for new tables, and `db_context._migrate()` runs on every connection to add any new columns to existing tables (each `ALTER TABLE` is wrapped so it's a no-op once applied) — so a plain `./scripts/manage.sh update` + restart is enough for both. No manual `ALTER TABLE` step needed.
+
+### 6. Logs
 
 ```bash
-ssh rohitpras@<pi-ip>
-cd ~/PersonalFinanceApp
-source venv/bin/activate
+./scripts/manage.sh logs           # journalctl -u finance-app -f
+./scripts/manage.sh tunnel logs    # journalctl -u cloudflared -f
 
-# Run for master.db if users table changed
-python3 -c "
-import sqlite3
-conn = sqlite3.connect('data/master.db')
-conn.execute('ALTER TABLE users ADD COLUMN new_col TEXT')
-conn.commit(); conn.close()
-"
-
-# Run for each user's finance DB
-python3 -c "
-import sqlite3, glob
-for path in glob.glob('data/user_*_finance.db'):
-    conn = sqlite3.connect(path)
-    conn.execute('ALTER TABLE transactions ADD COLUMN new_col TEXT')
-    conn.commit(); conn.close()
-    print('migrated', path)
-"
-```
-
-Then restart the service.
-
-### 5. Logs
-
-```bash
-# App logs
-tail -f ~/PersonalFinanceApp/logs/app.log
-
-# Gunicorn access log
-tail -f ~/PersonalFinanceApp/logs/access.log
-
-# Systemd journal
-sudo journalctl -u finance-app -f
+# Or directly:
+tail -f logs/app.log
+tail -f logs/access.log
 ```
 
 ---
@@ -494,6 +465,7 @@ sudo journalctl -u finance-app -f
 data/*.db        # All SQLite database files — contain real financial data
 data/*.db-shm    # WAL shared memory file
 data/*.db-wal    # WAL write-ahead log
+data/backups/    # ./scripts/manage.sh backup output
 .env             # Secret keys — NEVER commit
 logs/
 venv/
@@ -506,15 +478,7 @@ frontend/dist/
 - **Never commit `data/`** — it contains your personal financial transactions, Gmail app passwords (encrypted but still private), and user accounts. Add it to `.gitignore` and keep it there.
 - **Never commit `.env`** — it contains your `SECRET_KEY` and `ENCRYPTION_KEY`. If these leak, anyone can forge JWTs and decrypt stored credentials.
 - The database schema lives in `db_context.py` and `models/user.py` — the actual `.db` files are created at runtime from code, so nothing is lost by excluding them from git.
-- If you want to back up your data, use `sqlite3` directly or copy the `data/` directory to a safe location (external drive, encrypted cloud storage). **Do not use git for this.**
-
-**Backup your production databases manually:**
-
-```bash
-# On the Pi
-sqlite3 ~/PersonalFinanceApp/data/master.db ".backup /path/to/backup/master.db"
-sqlite3 ~/PersonalFinanceApp/data/user_1_finance.db ".backup /path/to/backup/user_1_finance.db"
-```
+- If you want to back up your data, run `./scripts/manage.sh backup` (writes timestamped copies to `data/backups/`, also gitignored) and copy that directory somewhere safe (external drive, encrypted cloud storage). **Do not use git for this.**
 
 ---
 
