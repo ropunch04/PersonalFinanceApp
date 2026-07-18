@@ -82,7 +82,7 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
 
             <div style={{
               width: "100%", height: 6, borderRadius: 3,
-              background: "#22263A", marginBottom: 4, overflow: "hidden",
+              background: "var(--surface-raised)", marginBottom: 4, overflow: "hidden",
             }}>
               <div style={{ width, height: "100%", borderRadius: 3, background: fill, transition: "width 300ms" }} />
             </div>

@@ -65,10 +65,12 @@ function BottomNav({ pendingCount }) {
   if (!isAuthenticated) return null;
   return (
     <nav className="bottom-nav">
-      <NavItem to="/" icon={<IconDashboard />} label="Home" end />
-      <NavItem to="/transactions" icon={<IconTransactions />} label="Transactions" badge={pendingCount} />
-      <NavItem to="/profile" icon={<IconProfile />} label="Profile" />
-      {user?.is_admin && <NavItem to="/admin" icon={<IconAdmin />} label="Admin" />}
+      <div className="bottom-nav-inner">
+        <NavItem to="/" icon={<IconDashboard />} label="Home" end />
+        <NavItem to="/transactions" icon={<IconTransactions />} label="Transactions" badge={pendingCount} />
+        <NavItem to="/profile" icon={<IconProfile />} label="Profile" />
+        {user?.is_admin && <NavItem to="/admin" icon={<IconAdmin />} label="Admin" />}
+      </div>
     </nav>
   );
 }

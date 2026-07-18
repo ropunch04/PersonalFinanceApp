@@ -42,7 +42,7 @@ function Note({ children }) {
 function TipBox({ children }) {
   return (
     <div style={{
-      background: "rgba(108, 99, 255, 0.08)", border: "1px solid rgba(108, 99, 255, 0.25)",
+      background: "rgba(34, 197, 94, 0.08)", border: "1px solid rgba(34, 197, 94, 0.25)",
       borderRadius: 8, padding: "10px 12px",
       fontSize: 13, color: "var(--text)", lineHeight: 1.5, marginBottom: 16,
     }}>

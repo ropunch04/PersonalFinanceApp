@@ -34,7 +34,7 @@ function DeltaBadge({ pct, invertColor }) {
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 2,
-      background: "#22263A", borderRadius: 6,
+      background: "var(--surface-raised)", borderRadius: 6,
       fontSize: 11, fontWeight: 600, color,
       padding: "2px 6px", marginLeft: 6,
     }}>
@@ -79,7 +79,7 @@ export default function ComparisonCard({ dateParams }) {
   if (loading && !data) {
     return (
       <div style={{
-        height: 140, borderRadius: 12, background: "#22263A",
+        height: 140, borderRadius: 12, background: "var(--surface-raised)",
         animation: "pulse 1.5s ease-in-out infinite", marginBottom: 20,
       }} />
     );
@@ -158,10 +158,10 @@ export default function ComparisonCard({ dateParams }) {
             {" "}this month
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ flex: 1, height: 4, borderRadius: 2, background: "#22263A", overflow: "hidden" }}>
+            <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--surface-raised)", overflow: "hidden" }}>
               <div style={{
                 width: `${Math.min((velocity.days_elapsed / velocity.days_in_month) * 100, 100)}%`,
-                height: "100%", borderRadius: 2, background: "#6C63FF",
+                height: "100%", borderRadius: 2, background: "#22C55E",
               }} />
             </div>
             <span style={{ fontSize: 11, color: "#475569", flexShrink: 0 }}>

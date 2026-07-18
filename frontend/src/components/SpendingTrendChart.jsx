@@ -26,7 +26,7 @@ function CustomTooltip({ active, payload, label }) {
   const income = payload.find((p) => p.dataKey === "income")?.value ?? 0;
   return (
     <div style={{
-      background: "#1A1D27", border: "1px solid #2E3250",
+      background: "var(--surface)", border: "1px solid var(--border)",
       borderRadius: 8, padding: "8px 12px", fontSize: 12,
     }}>
       <div style={{ color: "#94A3B8", marginBottom: 4 }}>{fmtLabel(label)}</div>
@@ -54,7 +54,7 @@ export default function SpendingTrendChart({ dateParams }) {
   if (loading && !data) {
     return (
       <div style={{
-        height: 200, borderRadius: 12, background: "#22263A",
+        height: 200, borderRadius: 12, background: "var(--surface-raised)",
         animation: "pulse 1.5s ease-in-out infinite",
         marginBottom: 20,
       }} />
@@ -77,7 +77,7 @@ export default function SpendingTrendChart({ dateParams }) {
       <p className="section-label" style={{ marginBottom: 8 }}>SPENDING TREND</p>
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -24 }}>
-          <CartesianGrid stroke="#2E3250" strokeDasharray="0" vertical={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="0" vertical={false} />
           <XAxis
             dataKey="date"
             tickFormatter={tickFormatter}

@@ -109,6 +109,11 @@ export const api = {
   updateProfile: (data) => request("PUT", "/api/profile", data),
   updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
 
+  getRecurringIncome: () => request("GET", "/api/recurring-income"),
+  createRecurringIncome: (data) => request("POST", "/api/recurring-income", data),
+  updateRecurringIncome: (id, data) => request("PUT", `/api/recurring-income/${id}`, data),
+  deleteRecurringIncome: (id) => request("DELETE", `/api/recurring-income/${id}`),
+
   sync: () => request("POST", "/api/sync"),
   syncNow: () => request("POST", "/api/sync"),
   syncStatus: () => request("GET", "/api/sync/status"),

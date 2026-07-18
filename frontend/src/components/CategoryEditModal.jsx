@@ -74,7 +74,7 @@ export default function CategoryEditModal({ category, canFold, onClose, onSave, 
                   className="btn btn-sm"
                   style={{
                     border: `1.5px solid ${period === p ? "var(--primary)" : "var(--border)"}`,
-                    background: period === p ? "rgba(108,99,255,0.15)" : "transparent",
+                    background: period === p ? "rgba(34,197,94,0.15)" : "transparent",
                     color: period === p ? "var(--primary)" : "var(--text-muted)",
                   }}
                 >
@@ -97,7 +97,7 @@ export default function CategoryEditModal({ category, canFold, onClose, onSave, 
               disabled={settingMisc}
               style={{
                 border: `1.5px solid ${isMisc ? "var(--primary)" : "var(--border)"}`,
-                background: isMisc ? "rgba(108,99,255,0.15)" : "transparent",
+                background: isMisc ? "rgba(34,197,94,0.15)" : "transparent",
                 color: isMisc ? "var(--primary)" : "var(--text-muted)",
               }}
             >

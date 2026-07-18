@@ -19,6 +19,13 @@ function EyeIcon({ open }) {
   );
 }
 
+const FREQUENCY_LABELS = {
+  weekly: "Weekly",
+  biweekly: "Every 2 weeks",
+  semimonthly: "Twice a month",
+  monthly: "Monthly",
+};
+
 function PwField({ label, value, onChange, autoComplete, placeholder }) {
   const [show, setShow] = useState(false);
   return (
@@ -59,6 +66,18 @@ export default function Profile({ setup = false }) {
   const [movingCategory, setMovingCategory] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
 
+  const [recurringIncomes, setRecurringIncomes] = useState([]);
+  const [addingIncome, setAddingIncome] = useState(false);
+  const [savingIncome, setSavingIncome] = useState(false);
+  const [incomeMsg, setIncomeMsg] = useState(null);
+  const [newIncome, setNewIncome] = useState({
+    label: "Paycheck",
+    amount: "",
+    frequency: "biweekly",
+    start_date: "",
+    day_of_month2: "",
+  });
+
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [savingGmail, setSavingGmail] = useState(false);
@@ -82,7 +101,58 @@ export default function Profile({ setup = false }) {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    api.getRecurringIncome()
+      .then(setRecurringIncomes)
+      .catch((e) => setIncomeMsg(`Error: ${e.message}`));
   }, []);
+
+  async function handleAddIncome(e) {
+    e.preventDefault();
+    setSavingIncome(true);
+    setIncomeMsg(null);
+    try {
+      const amount = parseFloat(newIncome.amount);
+      if (!amount || amount <= 0) throw new Error("Enter an amount greater than 0");
+      if (!newIncome.start_date) throw new Error("Pick a start date");
+      const payload = {
+        label: newIncome.label.trim() || "Paycheck",
+        amount,
+        frequency: newIncome.frequency,
+        start_date: newIncome.start_date,
+      };
+      if (newIncome.frequency === "semimonthly") {
+        const day2 = parseInt(newIncome.day_of_month2, 10);
+        if (!day2 || day2 < 1 || day2 > 31) throw new Error("Enter a valid second payday (1-31)");
+        payload.day_of_month2 = day2;
+      }
+      const created = await api.createRecurringIncome(payload);
+      setRecurringIncomes((prev) => [...prev, created].sort((a, b) => a.next_run_date.localeCompare(b.next_run_date)));
+      setNewIncome({ label: "Paycheck", amount: "", frequency: "biweekly", start_date: "", day_of_month2: "" });
+      setAddingIncome(false);
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    } finally {
+      setSavingIncome(false);
+    }
+  }
+
+  async function handleToggleIncomeActive(income) {
+    try {
+      const updated = await api.updateRecurringIncome(income.id, { active: !income.active });
+      setRecurringIncomes((prev) => prev.map((r) => (r.id === income.id ? updated : r)));
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    }
+  }
+
+  async function handleDeleteIncome(id) {
+    try {
+      await api.deleteRecurringIncome(id);
+      setRecurringIncomes((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    }
+  }
 
   async function handleSaveBudget(e) {
     e.preventDefault();
@@ -398,6 +468,140 @@ export default function Profile({ setup = false }) {
               </button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <div className="profile-block">
+        <p className="section-label">Recurring Income</p>
+        <div className="card">
+          {recurringIncomes.length > 0 && (
+            <div className="budget-list" style={{ marginBottom: addingIncome ? 16 : 0 }}>
+              {recurringIncomes.map((income) => (
+                <div className="budget-row" key={income.id} style={{ alignItems: "center", gap: 8 }}>
+                  <span className="budget-cat" style={{ opacity: income.active ? 1 : 0.5 }}>
+                    {income.label}
+                    <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      {FREQUENCY_LABELS[income.frequency] ?? income.frequency}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 13, opacity: income.active ? 1 : 0.5, whiteSpace: "nowrap" }}>
+                    ${Number(income.amount).toFixed(2)}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, whiteSpace: "nowrap" }}>
+                    {income.active ? `Next: ${income.next_run_date}` : "Paused"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleToggleIncomeActive(income)}
+                    style={{ flexShrink: 0, padding: "0 10px" }}
+                  >
+                    {income.active ? "Pause" : "Resume"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleDeleteIncome(income.id)}
+                    style={{ flexShrink: 0, padding: "0 10px" }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {addingIncome ? (
+            <form onSubmit={handleAddIncome}>
+              <div className="form-stack">
+                <div className="field">
+                  <label className="field-label">Label</label>
+                  <input
+                    type="text"
+                    value={newIncome.label}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, label: e.target.value }))}
+                    placeholder="Paycheck"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">Amount</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={newIncome.amount}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, amount: e.target.value }))}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">Schedule</label>
+                  <select
+                    value={newIncome.frequency}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, frequency: e.target.value }))}
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 weeks</option>
+                    <option value="semimonthly">Twice a month</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="field-label">
+                    {newIncome.frequency === "semimonthly" ? "First Payday" : "Start Date"}
+                  </label>
+                  <input
+                    type="date"
+                    value={newIncome.start_date}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, start_date: e.target.value }))}
+                  />
+                </div>
+                {newIncome.frequency === "semimonthly" && (
+                  <div className="field">
+                    <label className="field-label">Second Payday (day of month)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={newIncome.day_of_month2}
+                      onChange={(e) => setNewIncome((v) => ({ ...v, day_of_month2: e.target.value }))}
+                      placeholder="e.g. 15"
+                    />
+                  </div>
+                )}
+                {incomeMsg && (
+                  <div className={`msg ${incomeMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                    {incomeMsg}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" type="submit" disabled={savingIncome}>
+                    {savingIncome ? "Saving…" : "Add"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => { setAddingIncome(false); setIncomeMsg(null); }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setAddingIncome(true)}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              + Add Recurring Income
+            </button>
+          )}
+
+          {!addingIncome && incomeMsg && (
+            <div className={`msg ${incomeMsg.startsWith("Error") ? "msg-error" : "msg-success"}`} style={{ marginTop: 10 }}>
+              {incomeMsg}
+            </div>
+          )}
         </div>
       </div>
 

@@ -835,7 +835,7 @@ export default function Transactions() {
                 fontSize: 13,
                 fontWeight: 600,
                 border: `1.5px solid ${filterStatus === opt.value ? "var(--primary)" : "var(--border)"}`,
-                background: filterStatus === opt.value ? "rgba(108,99,255,0.15)" : "transparent",
+                background: filterStatus === opt.value ? "rgba(34,197,94,0.15)" : "transparent",
                 color: filterStatus === opt.value ? "var(--primary)" : "var(--text-muted)",
                 cursor: "pointer",
                 whiteSpace: "nowrap",
@@ -858,7 +858,7 @@ export default function Transactions() {
                 fontSize: 13,
                 fontWeight: 600,
                 border: `1.5px solid ${source === opt.value ? "var(--primary)" : "var(--border)"}`,
-                background: source === opt.value ? "rgba(108,99,255,0.15)" : "transparent",
+                background: source === opt.value ? "rgba(34,197,94,0.15)" : "transparent",
                 color: source === opt.value ? "var(--primary)" : "var(--text-muted)",
                 cursor: "pointer",
                 whiteSpace: "nowrap",
@@ -905,7 +905,7 @@ export default function Transactions() {
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: "rgba(108,99,255,0.15)", border: "1.5px solid var(--primary)",
+              background: "rgba(34,197,94,0.15)", border: "1.5px solid var(--primary)",
               color: "var(--primary)",
             }}>
               {pinnedIds.length} pinned included

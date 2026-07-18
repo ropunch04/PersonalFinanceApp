@@ -74,7 +74,7 @@ export default function MerchantInsights({ dateParams }) {
   if (loading && !data) {
     return (
       <div style={{
-        height: 120, borderRadius: 12, background: "#22263A",
+        height: 120, borderRadius: 12, background: "var(--surface-raised)",
         animation: "pulse 1.5s ease-in-out infinite", marginBottom: 20,
       }} />
     );
@@ -158,12 +158,12 @@ export default function MerchantInsights({ dateParams }) {
               {repeat_merchants.map((m, i) => (
                 <div key={i} style={{
                   display: "flex", alignItems: "center", gap: 6,
-                  background: "#22263A", border: "1px solid #2E3250",
+                  background: "var(--surface-raised)", border: "1px solid var(--border)",
                   borderRadius: 20, padding: "5px 10px",
                 }}>
                   <span style={{ fontSize: 13, color: "#F1F5F9" }}>{m.merchant_raw}</span>
                   <span style={{
-                    background: "#2E3250", borderRadius: 10,
+                    background: "var(--border)", borderRadius: 10,
                     fontSize: 10, fontWeight: 700, color: "#94A3B8",
                     padding: "1px 5px",
                   }}>

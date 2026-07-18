@@ -1,16 +1,17 @@
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface-raised: #22263a;
-  --border: #2e3250;
-  --primary: #6c63ff;
-  --primary-dim: #3d3880;
+  --bg: #06090a;
+  --surface: #0e1512;
+  --surface-raised: #16211c;
+  --border: #1f2e27;
+  --primary: #22c55e;
+  --primary-dim: #16a34a;
+  --primary-glow: rgba(34, 197, 94, 0.35);
   --green: #22c55e;
   --red: #ef4444;
   --amber: #f59e0b;
   --text: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
+  --text-secondary: #8fa39a;
+  --text-muted: #4b5a53;
 
   --bottom-nav-height: 60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -35,7 +36,11 @@
 }
 
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(560px 360px at 15% 0%, var(--primary-glow), transparent 70%),
+    radial-gradient(480px 320px at 90% 8%, rgba(34, 197, 94, 0.16), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
   min-height: 100dvh;
   padding-top: var(--safe-top);
 }
@@ -63,13 +68,13 @@ a {
 
 #root {
   min-height: 100dvh;
-  background: var(--bg);
+  background: transparent;
   position: relative;
-  max-width: 960px;
-  margin: 0 auto;
 }
 
 .page {
+  max-width: 960px;
+  margin: 0 auto;
   padding: 0 16px;
   padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 16px);
 }
@@ -138,10 +143,8 @@ a {
 .bottom-nav {
   position: fixed;
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 960px;
+  left: 0;
+  right: 0;
   height: calc(var(--bottom-nav-height) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
   background: var(--surface);
@@ -149,6 +152,14 @@ a {
   display: flex;
   align-items: stretch;
   z-index: 100;
+}
+
+.bottom-nav-inner {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .bottom-nav a {
@@ -230,7 +241,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 16px rgba(108, 99, 255, 0.45);
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.45);
   z-index: 90;
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
@@ -238,7 +249,7 @@ a {
 
 .fab:active {
   transform: scale(0.93);
-  box-shadow: 0 2px 8px rgba(108, 99, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
 }
 
 @media (min-width: 768px) {
@@ -281,8 +292,8 @@ a {
   font-size: 13px;
   font-weight: 500;
   border: none;
-  background: #22263A;
-  color: #94A3B8;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: background 120ms, color 120ms;
   min-height: unset;
@@ -290,8 +301,8 @@ a {
 }
 
 .range-pill.active {
-  background: #6C63FF;
-  color: #fff;
+  background: var(--primary);
+  color: #04140b;
 }
 
 .summary-grid {
@@ -318,9 +329,9 @@ a {
 .filter-row::-webkit-scrollbar { display: none; }
 
 .card {
-  background: var(--surface);
+  background: linear-gradient(160deg, var(--surface-raised), var(--surface));
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 16px;
 }
 
@@ -350,7 +361,7 @@ a {
 
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  color: #04140b;
   width: 100%;
 }
 
@@ -872,7 +883,7 @@ select:focus {
 
 .segmented button.seg-active {
   background: var(--primary);
-  color: #fff;
+  color: #04140b;
 }
 
 .segmented button:active {
@@ -1076,7 +1087,7 @@ select:focus {
   font-size: 11px;
   font-weight: 500;
   border-radius: 4px;
-  background: rgba(108, 99, 255, 0.2);
+  background: rgba(34, 197, 94, 0.2);
   color: var(--primary);
 }
 
