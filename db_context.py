@@ -94,6 +94,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (index, row["id"]))
         conn.commit()
 
+    misc_count = conn.execute("SELECT COUNT(*) AS n FROM categories WHERE is_misc = 1").fetchone()["n"]
+    if misc_count == 0:
+        conn.execute(
+            "UPDATE categories SET is_misc = 1 "
+            "WHERE id = (SELECT id FROM categories WHERE LOWER(name) = 'other' ORDER BY id LIMIT 1)"
+        )
+        conn.commit()
+
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
     if "user_db" not in g:

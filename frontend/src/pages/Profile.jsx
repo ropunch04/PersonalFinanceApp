@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
+import CategoryEditModal from "../components/CategoryEditModal";
 
 function EyeIcon({ open }) {
   return open ? (
@@ -55,8 +56,8 @@ export default function Profile({ setup = false }) {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
   const [categoryMsg, setCategoryMsg] = useState(null);
-  const [deletingCategoryId, setDeletingCategoryId] = useState(null);
   const [movingCategory, setMovingCategory] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
 
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
@@ -76,7 +77,7 @@ export default function Profile({ setup = false }) {
     api.getProfile()
       .then((data) => {
         setProfile(data);
-        setBudgets(data.budgets.map((b) => ({ ...b })));
+        setBudgets(data.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
         setGmailAddress(data.gmail_address ?? "");
       })
       .catch((e) => setError(e.message))
@@ -107,18 +108,27 @@ export default function Profile({ setup = false }) {
   }
 
   async function handleSetMisc(categoryId, isMisc) {
-    setCategoryMsg(null);
-    try {
-      await api.setMiscCategory(categoryId, isMisc);
-      setBudgets((prev) =>
-        prev.map((b) => ({
-          ...b,
-          is_misc: b.category_id === categoryId ? isMisc : isMisc ? false : b.is_misc,
-        }))
-      );
-    } catch (err) {
-      setCategoryMsg(`Error: ${err.message}`);
-    }
+    await api.setMiscCategory(categoryId, isMisc);
+    setBudgets((prev) =>
+      prev.map((b) => ({
+        ...b,
+        is_misc: b.category_id === categoryId ? isMisc : isMisc ? false : b.is_misc,
+      }))
+    );
+  }
+
+  async function handleSaveCategoryEdit(categoryId, updates) {
+    const target = budgets.find((b) => b.category_id === categoryId);
+    const updated = await api.updateProfile({
+      budgets: [{
+        category_id: categoryId,
+        amount: parseFloat(target?.amount) || 0,
+        period: updates.period,
+        fold_into_misc: updates.fold_into_misc,
+      }],
+    });
+    setProfile(updated);
+    setBudgets(updated.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
   }
 
   async function handleAddCategory(e) {
@@ -149,16 +159,8 @@ export default function Profile({ setup = false }) {
   }
 
   async function handleDeleteCategory(categoryId) {
-    setDeletingCategoryId(categoryId);
-    setCategoryMsg(null);
-    try {
-      await api.deleteCategory(categoryId);
-      setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
-    } catch (err) {
-      setCategoryMsg(`Error: ${err.message}`);
-    } finally {
-      setDeletingCategoryId(null);
-    }
+    await api.deleteCategory(categoryId);
+    setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
   }
 
   async function handleMoveCategory(index, direction) {
@@ -337,98 +339,18 @@ export default function Profile({ setup = false }) {
                           }
                           placeholder="0.00"
                         />
-                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                          {["monthly", "yearly"].map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              disabled={!b.is_misc && b.fold_into_misc}
-                              onClick={() =>
-                                setBudgets((prev) =>
-                                  prev.map((item, idx) =>
-                                    idx === i ? { ...item, period: p } : item
-                                  )
-                                )
-                              }
-                              style={{
-                                padding: "3px 8px",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                borderRadius: 6,
-                                border: `1.5px solid ${(b.period ?? "monthly") === p ? "var(--primary)" : "var(--border)"}`,
-                                background: (b.period ?? "monthly") === p ? "rgba(108,99,255,0.15)" : "transparent",
-                                color: (b.period ?? "monthly") === p ? "var(--primary)" : "var(--text-muted)",
-                                cursor: "pointer",
-                                minWidth: "unset",
-                                minHeight: "unset",
-                              }}
-                            >
-                              {p === "monthly" ? "Mo" : "Yr"}
-                            </button>
-                          ))}
-                        </div>
-                        {editingCategories && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
-                            <button
-                              type="button"
-                              onClick={() => handleSetMisc(b.category_id, !b.is_misc)}
-                              title="Use as the Misc/Flex bucket"
-                              style={{
-                                padding: "3px 8px",
-                                fontSize: 10,
-                                fontWeight: 600,
-                                borderRadius: 6,
-                                border: `1.5px solid ${b.is_misc ? "var(--primary)" : "var(--border)"}`,
-                                background: b.is_misc ? "rgba(108,99,255,0.15)" : "transparent",
-                                color: b.is_misc ? "var(--primary)" : "var(--text-muted)",
-                                cursor: "pointer",
-                                minWidth: "unset",
-                                minHeight: "unset",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {b.is_misc ? "★ Misc" : "Set Misc"}
-                            </button>
-                            {!b.is_misc && (
-                              <label
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 4,
-                                  fontSize: 10,
-                                  color: "var(--text-muted)",
-                                  cursor: budgets.some((x) => x.is_misc) ? "pointer" : "not-allowed",
-                                  opacity: budgets.some((x) => x.is_misc) ? 1 : 0.5,
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={!!b.fold_into_misc}
-                                  disabled={!budgets.some((x) => x.is_misc)}
-                                  onChange={(e) =>
-                                    setBudgets((prev) =>
-                                      prev.map((item, idx) =>
-                                        idx === i ? { ...item, fold_into_misc: e.target.checked } : item
-                                      )
-                                    )
-                                  }
-                                  style={{ width: 12, height: 12 }}
-                                />
-                                Fold into Misc
-                              </label>
-                            )}
-                          </div>
-                        )}
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, minWidth: 20 }}>
+                          {b.is_misc ? "" : (b.period ?? "monthly") === "yearly" ? "/yr" : "/mo"}
+                        </span>
                         {editingCategories && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => handleDeleteCategory(b.category_id)}
-                            disabled={deletingCategoryId === b.category_id}
-                            title="Remove category"
+                            onClick={() => setEditingCategory(b)}
+                            title="Edit category"
                             style={{ flexShrink: 0, padding: "0 10px" }}
                           >
-                            {deletingCategoryId === b.category_id ? "…" : "Remove"}
+                            Edit
                           </button>
                         )}
                       </div>
@@ -614,6 +536,17 @@ export default function Profile({ setup = false }) {
           </button>
         </div>
       </div>
+
+      {editingCategory && (
+        <CategoryEditModal
+          category={editingCategory}
+          canFold={!editingCategory.is_misc && budgets.some((x) => x.is_misc)}
+          onClose={() => setEditingCategory(null)}
+          onSave={(updates) => handleSaveCategoryEdit(editingCategory.category_id, updates)}
+          onSetMisc={(isMisc) => handleSetMisc(editingCategory.category_id, isMisc)}
+          onRemove={() => handleDeleteCategory(editingCategory.category_id)}
+        />
+      )}
     </div>
   );
 }

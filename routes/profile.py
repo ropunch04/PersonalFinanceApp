@@ -33,7 +33,10 @@ def _fetch_profile(conn) -> dict:
         "gmail_address": row["gmail_address"] if row else None,
         "gmail_configured": bool(row["gmail_address"]) if row else False,
         "last_synced_at": row["last_synced_at"] if row else None,
-        "budgets": [dict(b) for b in budgets],
+        "budgets": [
+            {**dict(b), "is_misc": bool(b["is_misc"]), "fold_into_misc": bool(b["fold_into_misc"])}
+            for b in budgets
+        ],
     }
 
 

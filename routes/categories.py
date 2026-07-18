@@ -14,6 +14,10 @@ def _err(message, status):
     return {"data": None, "error": message}, status
 
 
+def _serialize_category(row):
+    return {**dict(row), "is_misc": bool(row["is_misc"])}
+
+
 @bp.get("/categories")
 @require_auth
 def list_categories():
@@ -21,7 +25,7 @@ def list_categories():
     rows = db.execute(
         "SELECT id, name, is_misc FROM categories ORDER BY sort_order, id"
     ).fetchall()
-    return _ok([dict(r) for r in rows])
+    return _ok([_serialize_category(r) for r in rows])
 
 
 @bp.put("/categories/<int:category_id>/misc")
@@ -43,7 +47,7 @@ def set_misc_category(category_id):
     db.commit()
 
     rows = db.execute("SELECT id, name, is_misc FROM categories ORDER BY sort_order, id").fetchall()
-    return _ok([dict(r) for r in rows])
+    return _ok([_serialize_category(r) for r in rows])
 
 
 @bp.post("/categories")
@@ -70,7 +74,7 @@ def create_category():
     db.commit()
 
     row = db.execute("SELECT id, name, is_misc FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return _ok(dict(row)), 201
+    return _ok(_serialize_category(row)), 201
 
 
 @bp.delete("/categories/<int:category_id>")
