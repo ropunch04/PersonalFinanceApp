@@ -18,7 +18,31 @@ def _err(message, status):
 @require_auth
 def list_categories():
     db = get_user_db(g.current_user["user_id"])
-    rows = db.execute("SELECT id, name FROM categories ORDER BY sort_order, id").fetchall()
+    rows = db.execute(
+        "SELECT id, name, is_misc FROM categories ORDER BY sort_order, id"
+    ).fetchall()
+    return _ok([dict(r) for r in rows])
+
+
+@bp.put("/categories/<int:category_id>/misc")
+@require_auth
+def set_misc_category(category_id):
+    db = get_user_db(g.current_user["user_id"])
+    body = request.get_json(silent=True) or {}
+    is_misc = bool(body.get("is_misc"))
+
+    row = db.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row is None:
+        return _err("Category not found", 404)
+
+    if is_misc:
+        db.execute("UPDATE categories SET is_misc = 0")
+        db.execute("UPDATE categories SET is_misc = 1 WHERE id = ?", (category_id,))
+    else:
+        db.execute("UPDATE categories SET is_misc = 0 WHERE id = ?", (category_id,))
+    db.commit()
+
+    rows = db.execute("SELECT id, name, is_misc FROM categories ORDER BY sort_order, id").fetchall()
     return _ok([dict(r) for r in rows])
 
 
@@ -45,7 +69,7 @@ def create_category():
     db.execute("INSERT OR IGNORE INTO budgets (category_id, amount) VALUES (?, 0)", (cur.lastrowid,))
     db.commit()
 
-    row = db.execute("SELECT id, name FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
+    row = db.execute("SELECT id, name, is_misc FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _ok(dict(row)), 201
 
 

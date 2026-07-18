@@ -93,6 +93,7 @@ export default function Profile({ setup = false }) {
           category_id: b.category_id,
           amount: parseFloat(b.amount),
           period: b.period ?? "monthly",
+          fold_into_misc: !!b.fold_into_misc,
         })),
       });
       setProfile(updated);
@@ -102,6 +103,21 @@ export default function Profile({ setup = false }) {
       setBudgetMsg(`Error: ${err.message}`);
     } finally {
       setSavingBudget(false);
+    }
+  }
+
+  async function handleSetMisc(categoryId, isMisc) {
+    setCategoryMsg(null);
+    try {
+      await api.setMiscCategory(categoryId, isMisc);
+      setBudgets((prev) =>
+        prev.map((b) => ({
+          ...b,
+          is_misc: b.category_id === categoryId ? isMisc : isMisc ? false : b.is_misc,
+        }))
+      );
+    } catch (err) {
+      setCategoryMsg(`Error: ${err.message}`);
     }
   }
 
@@ -115,7 +131,14 @@ export default function Profile({ setup = false }) {
       const category = await api.createCategory(name);
       setBudgets((prev) => [
         ...prev,
-        { category_id: category.id, category_name: category.name, amount: 0, period: "monthly" },
+        {
+          category_id: category.id,
+          category_name: category.name,
+          amount: 0,
+          period: "monthly",
+          fold_into_misc: false,
+          is_misc: false,
+        },
       ]);
       setNewCategoryName("");
     } catch (err) {
@@ -253,6 +276,12 @@ export default function Profile({ setup = false }) {
                   </button>
                 </div>
 
+                {editingCategories && (
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -4, marginBottom: 10 }}>
+                    Pick one category as your Misc/Flex bucket. Spending that goes over any other
+                    category's budget — plus any category you fold in — counts against Misc instead.
+                  </p>
+                )}
                 {budgets.length > 0 && (
                   <div className="budget-list">
                     {budgets.map((b, i) => (
@@ -281,11 +310,24 @@ export default function Profile({ setup = false }) {
                             </button>
                           </div>
                         )}
-                        <span className="budget-cat">{b.category_name}</span>
+                        <span className="budget-cat">
+                          {b.category_name}
+                          {b.is_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                              MISC
+                            </span>
+                          )}
+                          {!b.is_misc && b.fold_into_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>
+                              → MISC
+                            </span>
+                          )}
+                        </span>
                         <input
                           type="text"
                           inputMode="numeric"
                           value={b.amount}
+                          disabled={!b.is_misc && b.fold_into_misc}
                           onChange={(e) =>
                             setBudgets((prev) =>
                               prev.map((item, idx) =>
@@ -300,6 +342,7 @@ export default function Profile({ setup = false }) {
                             <button
                               key={p}
                               type="button"
+                              disabled={!b.is_misc && b.fold_into_misc}
                               onClick={() =>
                                 setBudgets((prev) =>
                                   prev.map((item, idx) =>
@@ -324,6 +367,58 @@ export default function Profile({ setup = false }) {
                             </button>
                           ))}
                         </div>
+                        {editingCategories && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              onClick={() => handleSetMisc(b.category_id, !b.is_misc)}
+                              title="Use as the Misc/Flex bucket"
+                              style={{
+                                padding: "3px 8px",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                borderRadius: 6,
+                                border: `1.5px solid ${b.is_misc ? "var(--primary)" : "var(--border)"}`,
+                                background: b.is_misc ? "rgba(108,99,255,0.15)" : "transparent",
+                                color: b.is_misc ? "var(--primary)" : "var(--text-muted)",
+                                cursor: "pointer",
+                                minWidth: "unset",
+                                minHeight: "unset",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {b.is_misc ? "★ Misc" : "Set Misc"}
+                            </button>
+                            {!b.is_misc && (
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  fontSize: 10,
+                                  color: "var(--text-muted)",
+                                  cursor: budgets.some((x) => x.is_misc) ? "pointer" : "not-allowed",
+                                  opacity: budgets.some((x) => x.is_misc) ? 1 : 0.5,
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={!!b.fold_into_misc}
+                                  disabled={!budgets.some((x) => x.is_misc)}
+                                  onChange={(e) =>
+                                    setBudgets((prev) =>
+                                      prev.map((item, idx) =>
+                                        idx === i ? { ...item, fold_into_misc: e.target.checked } : item
+                                      )
+                                    )
+                                  }
+                                  style={{ width: 12, height: 12 }}
+                                />
+                                Fold into Misc
+                              </label>
+                            )}
+                          </div>
+                        )}
                         {editingCategories && (
                           <button
                             type="button"

@@ -21,9 +21,10 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
 
   if (!categories || categories.length === 0) return null;
 
-  const filtered   = selectedId ? categories.filter((c) => c.category_id === selectedId) : categories;
+  const shown      = categories.filter((c) => !c.folded_into_misc);
+  const filtered   = selectedId ? shown.filter((c) => c.category_id === selectedId) : shown;
   const withSpend  = filtered.filter((c) => c.spent > 0);
-  const zeroSpend  = selectedId ? [] : categories.filter((c) => c.spent <= 0);
+  const zeroSpend  = selectedId ? [] : shown.filter((c) => c.spent <= 0);
   const visible    = showEmpty ? filtered : withSpend;
 
   return (
@@ -65,6 +66,11 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 500, color: "#F1F5F9" }}>
                 {cat.category_name}
+                {cat.is_misc && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                    MISC
+                  </span>
+                )}
               </span>
               <span style={{
                 fontSize: 14, fontWeight: 600,
@@ -87,6 +93,11 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
                 : fmt(spent)}
               {cat.period === "yearly" && budget > 0 && (
                 <span style={{ marginLeft: 6, fontSize: 11, color: "#475569" }}>Jan–Dec</span>
+              )}
+              {cat.overflow_to_misc > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: "#475569" }}>
+                  ({fmt(cat.overflow_to_misc)} covered by Misc)
+                </span>
               )}
             </div>
           </div>
