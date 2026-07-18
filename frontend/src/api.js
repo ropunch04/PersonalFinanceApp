@@ -28,8 +28,6 @@ async function request(method, path, body = null) {
 export const api = {
   login: (username, password) =>
     request("POST", "/api/auth/login", { username, password }),
-  register: (username, email, password) =>
-    request("POST", "/api/auth/register", { username, email, password }),
   me: () => request("GET", "/api/auth/me"),
   logout: () => localStorage.removeItem(TOKEN_KEY),
 

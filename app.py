@@ -6,6 +6,8 @@ from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, g, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 import config
 from limiter import limiter
 from models.user import init_master_db
@@ -24,6 +26,12 @@ load_dotenv()
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__)
+
+# Trust exactly one proxy hop (the local cloudflared tunnel daemon) so
+# remote_addr/scheme/host reflect the forwarded client. Safe only while the
+# app is reached exclusively through a single trusted proxy (gunicorn binds
+# 127.0.0.1 and the tunnel is the sole peer).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # 10 MB max upload size
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024

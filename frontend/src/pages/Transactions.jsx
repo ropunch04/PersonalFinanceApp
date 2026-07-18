@@ -9,6 +9,7 @@ import { useOnline } from "../context/OnlineContext";
 const SOURCE_TYPES = [
   { value: "capitalone", label: "Capital One" },
   { value: "venmo", label: "Venmo" },
+  { value: "amex", label: "Amex" },
 ];
 
 const PAGE_SIZE = 25;

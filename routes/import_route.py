@@ -5,13 +5,14 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
-from services.import_service import parse_capitalone_csv, parse_venmo_csv
+from services.import_service import parse_amex_csv, parse_capitalone_csv, parse_venmo_csv
 
 bp = Blueprint("import", __name__, url_prefix="/api")
 
 _PARSERS = {
     "capitalone": parse_capitalone_csv,
     "venmo": parse_venmo_csv,
+    "amex": parse_amex_csv,
 }
 
 
@@ -28,7 +29,7 @@ def _err(message, status):
 def import_transactions():
     source_type = request.form.get("source_type", "").strip().lower()
     if source_type not in _PARSERS:
-        return _err("source_type must be 'capitalone' or 'venmo'", 400)
+        return _err("source_type must be 'capitalone', 'venmo', or 'amex'", 400)
 
     files = request.files.getlist("file")
     if not files:
