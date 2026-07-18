@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
+import CategoryEditModal from "../components/CategoryEditModal";
 
 function EyeIcon({ open }) {
   return open ? (
@@ -17,6 +18,13 @@ function EyeIcon({ open }) {
     </svg>
   );
 }
+
+const FREQUENCY_LABELS = {
+  weekly: "Weekly",
+  biweekly: "Every 2 weeks",
+  semimonthly: "Twice a month",
+  monthly: "Monthly",
+};
 
 function PwField({ label, value, onChange, autoComplete, placeholder }) {
   const [show, setShow] = useState(false);
@@ -55,8 +63,20 @@ export default function Profile({ setup = false }) {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
   const [categoryMsg, setCategoryMsg] = useState(null);
-  const [deletingCategoryId, setDeletingCategoryId] = useState(null);
   const [movingCategory, setMovingCategory] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+
+  const [recurringIncomes, setRecurringIncomes] = useState([]);
+  const [addingIncome, setAddingIncome] = useState(false);
+  const [savingIncome, setSavingIncome] = useState(false);
+  const [incomeMsg, setIncomeMsg] = useState(null);
+  const [newIncome, setNewIncome] = useState({
+    label: "Paycheck",
+    amount: "",
+    frequency: "biweekly",
+    start_date: "",
+    day_of_month2: "",
+  });
 
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
@@ -76,12 +96,63 @@ export default function Profile({ setup = false }) {
     api.getProfile()
       .then((data) => {
         setProfile(data);
-        setBudgets(data.budgets.map((b) => ({ ...b })));
+        setBudgets(data.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
         setGmailAddress(data.gmail_address ?? "");
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    api.getRecurringIncome()
+      .then(setRecurringIncomes)
+      .catch((e) => setIncomeMsg(`Error: ${e.message}`));
   }, []);
+
+  async function handleAddIncome(e) {
+    e.preventDefault();
+    setSavingIncome(true);
+    setIncomeMsg(null);
+    try {
+      const amount = parseFloat(newIncome.amount);
+      if (!amount || amount <= 0) throw new Error("Enter an amount greater than 0");
+      if (!newIncome.start_date) throw new Error("Pick a start date");
+      const payload = {
+        label: newIncome.label.trim() || "Paycheck",
+        amount,
+        frequency: newIncome.frequency,
+        start_date: newIncome.start_date,
+      };
+      if (newIncome.frequency === "semimonthly") {
+        const day2 = parseInt(newIncome.day_of_month2, 10);
+        if (!day2 || day2 < 1 || day2 > 31) throw new Error("Enter a valid second payday (1-31)");
+        payload.day_of_month2 = day2;
+      }
+      const created = await api.createRecurringIncome(payload);
+      setRecurringIncomes((prev) => [...prev, created].sort((a, b) => a.next_run_date.localeCompare(b.next_run_date)));
+      setNewIncome({ label: "Paycheck", amount: "", frequency: "biweekly", start_date: "", day_of_month2: "" });
+      setAddingIncome(false);
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    } finally {
+      setSavingIncome(false);
+    }
+  }
+
+  async function handleToggleIncomeActive(income) {
+    try {
+      const updated = await api.updateRecurringIncome(income.id, { active: !income.active });
+      setRecurringIncomes((prev) => prev.map((r) => (r.id === income.id ? updated : r)));
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    }
+  }
+
+  async function handleDeleteIncome(id) {
+    try {
+      await api.deleteRecurringIncome(id);
+      setRecurringIncomes((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setIncomeMsg(`Error: ${err.message}`);
+    }
+  }
 
   async function handleSaveBudget(e) {
     e.preventDefault();
@@ -93,6 +164,7 @@ export default function Profile({ setup = false }) {
           category_id: b.category_id,
           amount: parseFloat(b.amount),
           period: b.period ?? "monthly",
+          fold_into_misc: !!b.fold_into_misc,
         })),
       });
       setProfile(updated);
@@ -105,6 +177,30 @@ export default function Profile({ setup = false }) {
     }
   }
 
+  async function handleSetMisc(categoryId, isMisc) {
+    await api.setMiscCategory(categoryId, isMisc);
+    setBudgets((prev) =>
+      prev.map((b) => ({
+        ...b,
+        is_misc: b.category_id === categoryId ? isMisc : isMisc ? false : b.is_misc,
+      }))
+    );
+  }
+
+  async function handleSaveCategoryEdit(categoryId, updates) {
+    const target = budgets.find((b) => b.category_id === categoryId);
+    const updated = await api.updateProfile({
+      budgets: [{
+        category_id: categoryId,
+        amount: parseFloat(target?.amount) || 0,
+        period: updates.period,
+        fold_into_misc: updates.fold_into_misc,
+      }],
+    });
+    setProfile(updated);
+    setBudgets(updated.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
+  }
+
   async function handleAddCategory(e) {
     e.preventDefault();
     const name = newCategoryName.trim();
@@ -115,7 +211,14 @@ export default function Profile({ setup = false }) {
       const category = await api.createCategory(name);
       setBudgets((prev) => [
         ...prev,
-        { category_id: category.id, category_name: category.name, amount: 0, period: "monthly" },
+        {
+          category_id: category.id,
+          category_name: category.name,
+          amount: 0,
+          period: "monthly",
+          fold_into_misc: false,
+          is_misc: false,
+        },
       ]);
       setNewCategoryName("");
     } catch (err) {
@@ -126,16 +229,8 @@ export default function Profile({ setup = false }) {
   }
 
   async function handleDeleteCategory(categoryId) {
-    setDeletingCategoryId(categoryId);
-    setCategoryMsg(null);
-    try {
-      await api.deleteCategory(categoryId);
-      setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
-    } catch (err) {
-      setCategoryMsg(`Error: ${err.message}`);
-    } finally {
-      setDeletingCategoryId(null);
-    }
+    await api.deleteCategory(categoryId);
+    setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
   }
 
   async function handleMoveCategory(index, direction) {
@@ -253,6 +348,12 @@ export default function Profile({ setup = false }) {
                   </button>
                 </div>
 
+                {editingCategories && (
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -4, marginBottom: 10 }}>
+                    Pick one category as your Misc/Flex bucket. Spending that goes over any other
+                    category's budget — plus any category you fold in — counts against Misc instead.
+                  </p>
+                )}
                 {budgets.length > 0 && (
                   <div className="budget-list">
                     {budgets.map((b, i) => (
@@ -281,11 +382,24 @@ export default function Profile({ setup = false }) {
                             </button>
                           </div>
                         )}
-                        <span className="budget-cat">{b.category_name}</span>
+                        <span className="budget-cat">
+                          {b.category_name}
+                          {b.is_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                              MISC
+                            </span>
+                          )}
+                          {!b.is_misc && b.fold_into_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>
+                              → MISC
+                            </span>
+                          )}
+                        </span>
                         <input
                           type="text"
                           inputMode="numeric"
                           value={b.amount}
+                          disabled={!b.is_misc && b.fold_into_misc}
                           onChange={(e) =>
                             setBudgets((prev) =>
                               prev.map((item, idx) =>
@@ -295,45 +409,18 @@ export default function Profile({ setup = false }) {
                           }
                           placeholder="0.00"
                         />
-                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                          {["monthly", "yearly"].map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              onClick={() =>
-                                setBudgets((prev) =>
-                                  prev.map((item, idx) =>
-                                    idx === i ? { ...item, period: p } : item
-                                  )
-                                )
-                              }
-                              style={{
-                                padding: "3px 8px",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                borderRadius: 6,
-                                border: `1.5px solid ${(b.period ?? "monthly") === p ? "var(--primary)" : "var(--border)"}`,
-                                background: (b.period ?? "monthly") === p ? "rgba(108,99,255,0.15)" : "transparent",
-                                color: (b.period ?? "monthly") === p ? "var(--primary)" : "var(--text-muted)",
-                                cursor: "pointer",
-                                minWidth: "unset",
-                                minHeight: "unset",
-                              }}
-                            >
-                              {p === "monthly" ? "Mo" : "Yr"}
-                            </button>
-                          ))}
-                        </div>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, minWidth: 20 }}>
+                          {b.is_misc ? "" : (b.period ?? "monthly") === "yearly" ? "/yr" : "/mo"}
+                        </span>
                         {editingCategories && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => handleDeleteCategory(b.category_id)}
-                            disabled={deletingCategoryId === b.category_id}
-                            title="Remove category"
+                            onClick={() => setEditingCategory(b)}
+                            title="Edit category"
                             style={{ flexShrink: 0, padding: "0 10px" }}
                           >
-                            {deletingCategoryId === b.category_id ? "…" : "Remove"}
+                            Edit
                           </button>
                         )}
                       </div>
@@ -381,6 +468,140 @@ export default function Profile({ setup = false }) {
               </button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <div className="profile-block">
+        <p className="section-label">Recurring Income</p>
+        <div className="card">
+          {recurringIncomes.length > 0 && (
+            <div className="budget-list" style={{ marginBottom: addingIncome ? 16 : 0 }}>
+              {recurringIncomes.map((income) => (
+                <div className="budget-row" key={income.id} style={{ alignItems: "center", gap: 8 }}>
+                  <span className="budget-cat" style={{ opacity: income.active ? 1 : 0.5 }}>
+                    {income.label}
+                    <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      {FREQUENCY_LABELS[income.frequency] ?? income.frequency}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 13, opacity: income.active ? 1 : 0.5, whiteSpace: "nowrap" }}>
+                    ${Number(income.amount).toFixed(2)}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, whiteSpace: "nowrap" }}>
+                    {income.active ? `Next: ${income.next_run_date}` : "Paused"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleToggleIncomeActive(income)}
+                    style={{ flexShrink: 0, padding: "0 10px" }}
+                  >
+                    {income.active ? "Pause" : "Resume"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleDeleteIncome(income.id)}
+                    style={{ flexShrink: 0, padding: "0 10px" }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {addingIncome ? (
+            <form onSubmit={handleAddIncome}>
+              <div className="form-stack">
+                <div className="field">
+                  <label className="field-label">Label</label>
+                  <input
+                    type="text"
+                    value={newIncome.label}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, label: e.target.value }))}
+                    placeholder="Paycheck"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">Amount</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={newIncome.amount}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, amount: e.target.value }))}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">Schedule</label>
+                  <select
+                    value={newIncome.frequency}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, frequency: e.target.value }))}
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 weeks</option>
+                    <option value="semimonthly">Twice a month</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="field-label">
+                    {newIncome.frequency === "semimonthly" ? "First Payday" : "Start Date"}
+                  </label>
+                  <input
+                    type="date"
+                    value={newIncome.start_date}
+                    onChange={(e) => setNewIncome((v) => ({ ...v, start_date: e.target.value }))}
+                  />
+                </div>
+                {newIncome.frequency === "semimonthly" && (
+                  <div className="field">
+                    <label className="field-label">Second Payday (day of month)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={newIncome.day_of_month2}
+                      onChange={(e) => setNewIncome((v) => ({ ...v, day_of_month2: e.target.value }))}
+                      placeholder="e.g. 15"
+                    />
+                  </div>
+                )}
+                {incomeMsg && (
+                  <div className={`msg ${incomeMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
+                    {incomeMsg}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-primary" type="submit" disabled={savingIncome}>
+                    {savingIncome ? "Saving…" : "Add"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => { setAddingIncome(false); setIncomeMsg(null); }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setAddingIncome(true)}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              + Add Recurring Income
+            </button>
+          )}
+
+          {!addingIncome && incomeMsg && (
+            <div className={`msg ${incomeMsg.startsWith("Error") ? "msg-error" : "msg-success"}`} style={{ marginTop: 10 }}>
+              {incomeMsg}
+            </div>
+          )}
         </div>
       </div>
 
@@ -519,6 +740,17 @@ export default function Profile({ setup = false }) {
           </button>
         </div>
       </div>
+
+      {editingCategory && (
+        <CategoryEditModal
+          category={editingCategory}
+          canFold={!editingCategory.is_misc && budgets.some((x) => x.is_misc)}
+          onClose={() => setEditingCategory(null)}
+          onSave={(updates) => handleSaveCategoryEdit(editingCategory.category_id, updates)}
+          onSetMisc={(isMisc) => handleSetMisc(editingCategory.category_id, isMisc)}
+          onRemove={() => handleDeleteCategory(editingCategory.category_id)}
+        />
+      )}
     </div>
   );
 }

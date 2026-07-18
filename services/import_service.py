@@ -3,10 +3,11 @@ import hashlib
 from datetime import datetime
 
 _CAPITALONE_SKIP = ("AUTOPAY PYMT", "MOBILE PYMT")
+_AMEX_SKIP = ("AUTOPAY PAYMENT",)
 
 
 def _source_hash(
-    provider: str, transaction_at: str, amount: float, merchant_raw: str, row_num: int
+    provider: str, transaction_at: str, amount: float, merchant_raw: str, row_num: int | str
 ) -> str:
     raw = f"{provider}|{transaction_at}|{amount}|{merchant_raw}|{row_num}"
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -58,6 +59,50 @@ def parse_capitalone_csv(stream, conn) -> tuple[list[dict], list[dict]]:
                     "transaction_at": transaction_at,
                     "source_hash": _source_hash(
                         "capitalone", transaction_at, amount, description, row_num
+                    ),
+                }
+            )
+
+        except Exception as exc:
+            errors.append({"row": row_num, "reason": str(exc), "data": dict(row)})
+
+    return transactions, errors
+
+
+def parse_amex_csv(stream, conn) -> tuple[list[dict], list[dict]]:
+    transactions, errors = [], []
+
+    reader = csv.DictReader(stream)
+    for row_num, row in enumerate(reader, start=2):
+        try:
+            description = row.get("Description", "").strip()
+            if any(skip in description for skip in _AMEX_SKIP):
+                continue
+
+            amount_raw = row.get("Amount", "").strip()
+            if not amount_raw:
+                errors.append({"row": row_num, "reason": "No value in Amount", "data": dict(row)})
+                continue
+
+            signed_amount = float(amount_raw)
+            direction = "outflow" if signed_amount > 0 else "inflow"
+            amount = abs(signed_amount)
+
+            date_str = row.get("Date", "").strip()
+            transaction_at = datetime.strptime(date_str, "%m/%d/%Y").strftime("%Y-%m-%dT00:00:00")
+
+            reference = row.get("Reference", "").strip().strip("'")
+            dedup_key = reference or row_num
+
+            transactions.append(
+                {
+                    "amount": amount,
+                    "direction": direction,
+                    "merchant_raw": description,
+                    "category_id": _get_category_id(conn, description),
+                    "transaction_at": transaction_at,
+                    "source_hash": _source_hash(
+                        "amex", transaction_at, amount, description, dedup_key
                     ),
                 }
             )

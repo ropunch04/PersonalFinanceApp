@@ -54,6 +54,8 @@ def get_budget_summary(
         SELECT
             c.id   AS category_id,
             c.name AS category_name,
+            c.is_misc AS is_misc,
+            COALESCE(b.fold_into_misc, 0) AS fold_into_misc,
             COALESCE(b.period, 'monthly') AS period,
             COALESCE(SUM(
                 CASE WHEN t.direction = 'outflow' THEN  t.amount
@@ -68,24 +70,48 @@ def get_budget_summary(
             OR
             (COALESCE(b.period, 'monthly') = 'yearly'  AND DATE(t.transaction_at) BETWEEN ? AND ?)
         )
-        GROUP BY c.id, c.name, b.amount, b.period
+        GROUP BY c.id, c.name, c.is_misc, b.amount, b.period, b.fold_into_misc
         ORDER BY spent DESC
     """, p + [year_start, year_end]).fetchall()
+
+    entries = []
+    for r in by_category:
+        budget = r["budget"] * month_count if r["period"] == "monthly" else r["budget"]
+        entries.append({
+            "category_id":      r["category_id"],
+            "category_name":    r["category_name"],
+            "period":           r["period"],
+            "spent":            r["spent"],
+            "budget":           budget,
+            "is_misc":          bool(r["is_misc"]),
+            "folded_into_misc": bool(r["fold_into_misc"]) and not r["is_misc"],
+        })
+
+    misc_entry = next((e for e in entries if e["is_misc"]), None)
+    if misc_entry is not None:
+        misc_addition = 0.0
+        for e in entries:
+            if e is misc_entry:
+                continue
+            if e["folded_into_misc"]:
+                misc_addition += e["spent"]
+                e["spent"] = 0.0
+                e["budget"] = 0.0
+            else:
+                overflow = max(e["spent"] - e["budget"], 0) if e["budget"] > 0 else 0
+                misc_addition += overflow
+                e["overflow_to_misc"] = overflow
+                e["spent"] = min(e["spent"], e["budget"]) if e["budget"] > 0 else e["spent"]
+        misc_entry["spent"] += misc_addition
+
+    for e in entries:
+        e.setdefault("overflow_to_misc", 0)
+        e["remaining"] = e["budget"] - e["spent"]
 
     return {
         "total_spent":  total_spent,
         "total_income": total_income,
         "net":          total_income - total_spent,
         "pending_count": pending_count,
-        "by_category": [
-            {
-                "category_id":   r["category_id"],
-                "category_name": r["category_name"],
-                "period":        r["period"],
-                "spent":         r["spent"],
-                "budget":        r["budget"] * month_count if r["period"] == "monthly" else r["budget"],
-                "remaining":     (r["budget"] * month_count if r["period"] == "monthly" else r["budget"]) - r["spent"],
-            }
-            for r in by_category
-        ],
+        "by_category": entries,
     }

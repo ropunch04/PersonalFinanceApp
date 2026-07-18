@@ -54,6 +54,7 @@ _VENMO_TO = re.compile(r"you paid (.+?) \$", re.IGNORECASE)
 _VENMO_CHARGER = re.compile(r"^(.+?) charged you", re.IGNORECASE | re.MULTILINE)
 
 _AMEX_MERCHANT_COLOR = "color:#006fcf"
+_AMEX_AMOUNT_COLOR = "color:#333333"
 
 
 def _source_hash(provider: str, message_id: str) -> str:
@@ -101,7 +102,7 @@ def _get_venmo_memo(msg: Message) -> str | None:
     return None
 
 
-def _get_amex_merchant(msg: Message) -> str | None:
+def _get_amex_styled_text(msg: Message, color: str) -> str | None:
     for part in msg.walk():
         if part.get_content_type() != "text/html":
             continue
@@ -115,11 +116,23 @@ def _get_amex_merchant(msg: Message) -> str | None:
         soup = BeautifulSoup(html, "html.parser")
         for div in soup.find_all("div", style=True):
             style = div["style"].replace(" ", "").lower()
-            if _AMEX_MERCHANT_COLOR in style and "font-weight:bold" in style:
+            if color in style and "font-weight:bold" in style:
                 text = div.get_text(strip=True)
                 if text:
                     return text
     return None
+
+
+def _get_amex_merchant(msg: Message) -> str | None:
+    return _get_amex_styled_text(msg, _AMEX_MERCHANT_COLOR)
+
+
+def _get_amex_amount(msg: Message) -> float | None:
+    text = _get_amex_styled_text(msg, _AMEX_AMOUNT_COLOR)
+    if not text:
+        return None
+    amount_m = _CAP1_AMOUNT.search(text)
+    return float(amount_m.group(1).replace(",", "")) if amount_m else None
 
 
 def _parse_cap1_date(text: str) -> str:
@@ -261,11 +274,9 @@ def _parse_amex_email(msg: Message, message_id: str, conn) -> dict | None:
 
     text = _get_text(msg)
 
-    amount_m = _CAP1_AMOUNT.search(text)
-    if not amount_m:
+    amount = _get_amex_amount(msg)
+    if amount is None:
         return None
-    amount = float(amount_m.group(1).replace(",", ""))
-
     merchant_raw = _get_amex_merchant(msg) or "Unknown Merchant"
 
     return {

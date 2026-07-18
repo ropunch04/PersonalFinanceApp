@@ -6,6 +6,8 @@ from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, g, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 import config
 from limiter import limiter
 from models.user import init_master_db
@@ -15,6 +17,7 @@ from routes.categories import bp as categories_bp
 from routes.dashboard import bp as dashboard_bp
 from routes.import_route import bp as import_bp
 from routes.profile import bp as profile_bp
+from routes.recurring_income import bp as recurring_income_bp
 from routes.sync_routes import bp as sync_bp
 from routes.transactions import bp as transactions_bp
 from services.sync_service import scheduled_sync_all
@@ -24,6 +27,12 @@ load_dotenv()
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__)
+
+# Trust exactly one proxy hop (the local cloudflared tunnel daemon) so
+# remote_addr/scheme/host reflect the forwarded client. Safe only while the
+# app is reached exclusively through a single trusted proxy (gunicorn binds
+# 127.0.0.1 and the tunnel is the sole peer).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # 10 MB max upload size
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
@@ -36,6 +45,7 @@ app.register_blueprint(categories_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(import_bp)
 app.register_blueprint(profile_bp)
+app.register_blueprint(recurring_income_bp)
 app.register_blueprint(sync_bp)
 app.register_blueprint(transactions_bp)
 

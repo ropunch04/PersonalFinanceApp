@@ -15,7 +15,9 @@ function barColor(ratio) {
 }
 
 export default function BudgetByCategoryWidget({ categories, selectedId, dateParams }) {
-  const budgeted = (categories ?? []).filter((c) => (c.budget ?? 0) > 0);
+  const budgeted = (categories ?? []).filter(
+    (c) => (c.budget ?? 0) > 0 && (c.period ?? "monthly") === "monthly"
+  );
   const totalBudget = budgeted.reduce((sum, c) => sum + (c.budget ?? 0), 0);
   const totalSpent = budgeted.reduce((sum, c) => sum + (c.spent ?? 0), 0);
   const totalRemaining = totalBudget - totalSpent;
@@ -25,7 +27,7 @@ export default function BudgetByCategoryWidget({ categories, selectedId, datePar
     <div>
       {totalBudget > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
-          <p className="section-label" style={{ marginBottom: 10 }}>Total Budget</p>
+          <p className="section-label" style={{ marginBottom: 10 }}>Total Monthly Budget</p>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 22, fontWeight: 700, color: "var(--text)" }}>

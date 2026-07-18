@@ -21,7 +21,7 @@ export default function CategoryPicker({ value, onChange, categories: propCats }
           className="cat-pill"
           style={value === c.id ? {
             borderColor: "var(--primary)",
-            background: "rgba(108,99,255,0.15)",
+            background: "rgba(34,197,94,0.15)",
             color: "var(--primary)",
           } : {}}
           onClick={() => onChange(value === c.id ? null : c.id)}

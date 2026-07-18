@@ -1,8 +1,8 @@
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
 const CATEGORY_COLORS = {
-  Food:          "#6C63FF",
-  Transport:     "#22C55E",
+  Food:          "#22C55E",
+  Transport:     "#6366F1",
   Shopping:      "#F59E0B",
   Entertainment: "#EC4899",
   Health:        "#14B8A6",
@@ -42,7 +42,7 @@ export default function CategoryDonut({ categories, selectedId, onSelect }) {
               endAngle={-270}
               stroke="none"
             >
-              <Cell fill="#22263A" />
+              <Cell fill="var(--surface-raised)" />
             </Pie>
           </PieChart>
         </ResponsiveContainer>

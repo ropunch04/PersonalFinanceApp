@@ -1,20 +1,26 @@
 [Unit]
-Description=Cloudflare Tunnel (finance-app)
+Description=Cloudflare Tunnel (budget.kotero.dev)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 
-User=rohitpras
-# Replace finance-app with the tunnel name you used in: cloudflared tunnel create <name>
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run finance-app
+User=kyleotero
+# Tunnel name must match: cloudflared tunnel create budget
+# Config lives at /home/kyleotero/.cloudflared/config.yml (see deploy/cloudflared-config.yml)
+ExecStart=/home/kyleotero/.local/bin/cloudflared tunnel --no-autoupdate --config /home/kyleotero/.cloudflared/config.yml run budget
 
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=cloudflared
+
+# Hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target

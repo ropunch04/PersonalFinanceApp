@@ -1,0 +1,15 @@
+# Cloudflare Tunnel config template for budget.kotero.dev
+#
+# 1. Run `cloudflared tunnel create budget` — it prints a Tunnel ID (a UUID)
+#    and writes /home/kyleotero/.cloudflared/<TUNNEL_ID>.json (the credentials).
+# 2. Replace <TUNNEL_ID> below (both places) with that UUID.
+# 3. Copy this file to /home/kyleotero/.cloudflared/config.yml
+
+tunnel: d250804b-7593-4cb5-aaa5-3f065dab1ab6
+credentials-file: /home/kyleotero/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: budget.kotero.dev
+    service: http://localhost:5100
+  # Anything that is not budget.kotero.dev gets a 404 (never proxied to the app)
+  - service: http_status:404

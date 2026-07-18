@@ -28,8 +28,6 @@ async function request(method, path, body = null) {
 export const api = {
   login: (username, password) =>
     request("POST", "/api/auth/login", { username, password }),
-  register: (username, email, password) =>
-    request("POST", "/api/auth/register", { username, email, password }),
   me: () => request("GET", "/api/auth/me"),
   logout: () => localStorage.removeItem(TOKEN_KEY),
 
@@ -96,6 +94,7 @@ export const api = {
   createCategory: (name) => request("POST", "/api/categories", { name }),
   deleteCategory: (id) => request("DELETE", `/api/categories/${id}`),
   reorderCategories: (order) => request("PUT", "/api/categories/reorder", { order }),
+  setMiscCategory: (id, is_misc) => request("PUT", `/api/categories/${id}/misc`, { is_misc }),
 
   queue: () => request("GET", "/api/queue"),
   confirm: (id, data) => request("PUT", `/api/transactions/${id}`, { ...data, status: "confirmed" }),
@@ -109,6 +108,11 @@ export const api = {
   getProfile: () => request("GET", "/api/profile"),
   updateProfile: (data) => request("PUT", "/api/profile", data),
   updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
+
+  getRecurringIncome: () => request("GET", "/api/recurring-income"),
+  createRecurringIncome: (data) => request("POST", "/api/recurring-income", data),
+  updateRecurringIncome: (id, data) => request("PUT", `/api/recurring-income/${id}`, data),
+  deleteRecurringIncome: (id) => request("DELETE", `/api/recurring-income/${id}`),
 
   sync: () => request("POST", "/api/sync"),
   syncNow: () => request("POST", "/api/sync"),

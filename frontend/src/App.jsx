@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { OnlineProvider } from "./context/OnlineContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import Login from "./pages/Login";
-import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
 import Profile from "./pages/Profile";
@@ -66,10 +65,12 @@ function BottomNav({ pendingCount }) {
   if (!isAuthenticated) return null;
   return (
     <nav className="bottom-nav">
-      <NavItem to="/" icon={<IconDashboard />} label="Home" end />
-      <NavItem to="/transactions" icon={<IconTransactions />} label="Transactions" badge={pendingCount} />
-      <NavItem to="/profile" icon={<IconProfile />} label="Profile" />
-      {user?.is_admin && <NavItem to="/admin" icon={<IconAdmin />} label="Admin" />}
+      <div className="bottom-nav-inner">
+        <NavItem to="/" icon={<IconDashboard />} label="Home" end />
+        <NavItem to="/transactions" icon={<IconTransactions />} label="Transactions" badge={pendingCount} />
+        <NavItem to="/profile" icon={<IconProfile />} label="Profile" />
+        {user?.is_admin && <NavItem to="/admin" icon={<IconAdmin />} label="Admin" />}
+      </div>
     </nav>
   );
 }
@@ -78,7 +79,6 @@ function AppRoutes({ setPendingCount }) {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
       <Route path="/" element={<ProtectedRoute><Dashboard onQueueChange={setPendingCount} /></ProtectedRoute>} />
       <Route path="/queue" element={<Navigate to="/transactions?status=pending" replace />} />
       <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />

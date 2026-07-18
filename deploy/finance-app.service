@@ -7,11 +7,11 @@ Wants=network.target
 Type=notify
 NotifyAccess=main
 
-User=rohitpras
-WorkingDirectory=/home/rohitpras/PersonalFinanceApp
+User=kyleotero
+WorkingDirectory=/home/kyleotero/projects/PersonalFinanceApp
 
-EnvironmentFile=/home/rohitpras/PersonalFinanceApp/.env
-ExecStart=/home/rohitpras/PersonalFinanceApp/venv/bin/gunicorn \
+EnvironmentFile=/home/kyleotero/projects/PersonalFinanceApp/.env
+ExecStart=/home/kyleotero/projects/PersonalFinanceApp/venv/bin/gunicorn \
     --config gunicorn.conf.py \
     app:app
 
@@ -21,9 +21,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=finance-app
 
-# Keep the process from writing outside its own directory
+# Hardening
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/home/kyleotero/projects/PersonalFinanceApp/data
+ReadWritePaths=/home/kyleotero/projects/PersonalFinanceApp/logs
 
 [Install]
 WantedBy=multi-user.target
