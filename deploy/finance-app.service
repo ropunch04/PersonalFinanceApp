@@ -21,9 +21,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=finance-app
 
-# Keep the process from writing outside its own directory
+# Hardening: OS is read-only to the service; only data/ and logs/ are writable
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/home/rohitpras/PersonalFinanceApp/data
+ReadWritePaths=/home/rohitpras/PersonalFinanceApp/logs
 
 [Install]
 WantedBy=multi-user.target

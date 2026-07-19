@@ -4,6 +4,7 @@ import { api } from "../api";
 const SOURCE_TYPES = [
   { value: "capitalone", label: "Capital One" },
   { value: "venmo", label: "Venmo" },
+  { value: "amex", label: "Amex" },
 ];
 
 export default function Import() {
@@ -80,7 +81,7 @@ export default function Import() {
               or drag and drop here
             </div>
           )}
-          {files.length === 0 && <div className="drop-zone-hint">Supports Capital One and Venmo exports</div>}
+          {files.length === 0 && <div className="drop-zone-hint">Supports Capital One, Venmo, and Amex exports</div>}
         </div>
 
         {error && <div className="msg msg-error" style={{ marginBottom: 12 }}>{error}</div>}

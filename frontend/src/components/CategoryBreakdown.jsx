@@ -15,7 +15,7 @@ function barColor(ratio) {
   return "#22C55E";
 }
 
-export default function CategoryBreakdown({ categories, selectedId, dateParams }) {
+export default function CategoryBreakdown({ categories, flexPoolRatio, selectedId, dateParams }) {
   const [showEmpty, setShowEmpty] = useState(false);
   const navigate = useNavigate();
 
@@ -35,10 +35,10 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
       {visible.map((cat) => {
         const budget = cat.budget ?? 0;
         const spent  = cat.spent  ?? 0;
-        const ratio  = budget > 0 ? spent / budget : 0;
-        const fill   = budget > 0 ? barColor(ratio) : "#94A3B8";
-        const width  = budget > 0 ? `${Math.min(ratio * 100, 100)}%` : "0%";
-        const overBudget = budget > 0 && spent >= budget;
+        const ratio  = cat.is_flex ? (flexPoolRatio ?? 0) : (budget > 0 ? spent / budget : 0);
+        const fill   = cat.is_flex || budget > 0 ? barColor(ratio) : "#94A3B8";
+        const width  = cat.is_flex || budget > 0 ? `${Math.min(ratio * 100, 100)}%` : "0%";
+        const overBudget = cat.is_flex ? (flexPoolRatio ?? 0) >= 1 : budget > 0 && spent >= budget;
 
         return (
           <div
@@ -65,6 +65,16 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 500, color: "#F1F5F9" }}>
                 {cat.category_name}
+                {cat.is_misc && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                    MISC
+                  </span>
+                )}
+                {cat.is_flex && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                    FLEX
+                  </span>
+                )}
               </span>
               <span style={{
                 fontSize: 14, fontWeight: 600,
@@ -76,7 +86,7 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
 
             <div style={{
               width: "100%", height: 6, borderRadius: 3,
-              background: "#22263A", marginBottom: 4, overflow: "hidden",
+              background: "var(--surface-raised)", marginBottom: 4, overflow: "hidden",
             }}>
               <div style={{ width, height: "100%", borderRadius: 3, background: fill, transition: "width 300ms" }} />
             </div>
@@ -87,6 +97,11 @@ export default function CategoryBreakdown({ categories, selectedId, dateParams }
                 : fmt(spent)}
               {cat.period === "yearly" && budget > 0 && (
                 <span style={{ marginLeft: 6, fontSize: 11, color: "#475569" }}>Jan–Dec</span>
+              )}
+              {cat.is_flex && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: "#475569" }}>
+                  (shared pool)
+                </span>
               )}
             </div>
           </div>

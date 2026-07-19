@@ -14,12 +14,40 @@ def _err(message, status):
     return {"data": None, "error": message}, status
 
 
+def _serialize_category(row):
+    return {**dict(row), "is_misc": bool(row["is_misc"])}
+
+
 @bp.get("/categories")
 @require_auth
 def list_categories():
     db = get_user_db(g.current_user["user_id"])
-    rows = db.execute("SELECT id, name FROM categories ORDER BY name").fetchall()
-    return _ok([dict(r) for r in rows])
+    rows = db.execute(
+        "SELECT id, name, is_misc FROM categories ORDER BY sort_order, id"
+    ).fetchall()
+    return _ok([_serialize_category(r) for r in rows])
+
+
+@bp.put("/categories/<int:category_id>/misc")
+@require_auth
+def set_misc_category(category_id):
+    db = get_user_db(g.current_user["user_id"])
+    body = request.get_json(silent=True) or {}
+    is_misc = bool(body.get("is_misc"))
+
+    row = db.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row is None:
+        return _err("Category not found", 404)
+
+    if is_misc:
+        db.execute("UPDATE categories SET is_misc = 0")
+        db.execute("UPDATE categories SET is_misc = 1 WHERE id = ?", (category_id,))
+    else:
+        db.execute("UPDATE categories SET is_misc = 0 WHERE id = ?", (category_id,))
+    db.commit()
+
+    rows = db.execute("SELECT id, name, is_misc FROM categories ORDER BY sort_order, id").fetchall()
+    return _ok([_serialize_category(r) for r in rows])
 
 
 @bp.post("/categories")
@@ -32,11 +60,60 @@ def create_category():
     if not name:
         return _err("name is required", 400)
 
-    cur = db.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,))
-    db.commit()
+    cur = db.execute(
+        "INSERT OR IGNORE INTO categories (name, sort_order) "
+        "VALUES (?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM categories))",
+        (name,),
+    )
 
     if cur.rowcount == 0:
+        db.commit()
         return _err("Category already exists", 409)
 
-    row = db.execute("SELECT id, name FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return _ok(dict(row)), 201
+    db.execute("INSERT OR IGNORE INTO budgets (category_id, amount) VALUES (?, 0)", (cur.lastrowid,))
+    db.commit()
+
+    row = db.execute("SELECT id, name, is_misc FROM categories WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return _ok(_serialize_category(row)), 201
+
+
+@bp.delete("/categories/<int:category_id>")
+@require_auth
+def delete_category(category_id):
+    db = get_user_db(g.current_user["user_id"])
+    row = db.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row is None:
+        return _err("Category not found", 404)
+
+    in_use = db.execute(
+        "SELECT COUNT(*) AS n FROM transactions WHERE category_id = ?", (category_id,)
+    ).fetchone()["n"]
+    if in_use > 0:
+        return _err(f"Cannot delete: {in_use} transaction(s) still use this category", 409)
+
+    db.execute("DELETE FROM budgets WHERE category_id = ?", (category_id,))
+    db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    db.commit()
+    return _ok({"id": category_id})
+
+
+@bp.put("/categories/reorder")
+@require_auth
+def reorder_categories():
+    db = get_user_db(g.current_user["user_id"])
+    body = request.get_json(silent=True) or {}
+    order = body.get("order")
+
+    if not isinstance(order, list) or not order:
+        return _err("order must be a non-empty list of category ids", 400)
+
+    existing_ids = {r["id"] for r in db.execute("SELECT id FROM categories").fetchall()}
+    if set(order) != existing_ids:
+        return _err("order must include every category id exactly once", 400)
+
+    for index, category_id in enumerate(order):
+        db.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (index, category_id))
+    db.commit()
+
+    rows = db.execute("SELECT id, name FROM categories ORDER BY sort_order, id").fetchall()
+    return _ok([dict(r) for r in rows])

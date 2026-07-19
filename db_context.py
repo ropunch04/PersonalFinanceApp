@@ -18,8 +18,10 @@ _DEFAULT_CATEGORIES = [
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS categories (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    name  TEXT NOT NULL UNIQUE
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_misc    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -45,10 +47,11 @@ CREATE TABLE IF NOT EXISTS profile (
 );
 
 CREATE TABLE IF NOT EXISTS budgets (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    category_id INTEGER NOT NULL REFERENCES categories(id),
-    amount      REAL    NOT NULL DEFAULT 0,
-    period      TEXT    NOT NULL DEFAULT 'monthly' CHECK(period IN ('monthly', 'yearly')),
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id     INTEGER NOT NULL REFERENCES categories(id),
+    amount          REAL    NOT NULL DEFAULT 0,
+    period          TEXT    NOT NULL DEFAULT 'monthly' CHECK(period IN ('monthly', 'yearly')),
+    fold_into_misc  INTEGER NOT NULL DEFAULT 0,
     UNIQUE(category_id)
 );
 """
@@ -65,6 +68,39 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.commit()
     except Exception:
         pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE categories ADD COLUMN is_misc INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE budgets ADD COLUMN fold_into_misc INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()
+    distinct_orders = conn.execute("SELECT COUNT(DISTINCT sort_order) AS n FROM categories").fetchone()["n"]
+    if len(rows) > 1 and distinct_orders <= 1:
+        for index, row in enumerate(rows):
+            conn.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (index, row["id"]))
+        conn.commit()
+
+    misc_count = conn.execute("SELECT COUNT(*) AS n FROM categories WHERE is_misc = 1").fetchone()["n"]
+    if misc_count == 0:
+        conn.execute(
+            "UPDATE categories SET is_misc = 1 "
+            "WHERE id = (SELECT id FROM categories WHERE LOWER(name) = 'other' ORDER BY id LIMIT 1)"
+        )
+        conn.commit()
 
 
 def get_user_db(user_id: int) -> sqlite3.Connection:
@@ -88,8 +124,13 @@ def init_user_db(user_id: int) -> None:
         conn.executescript(_SCHEMA)
         now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
-            "INSERT OR IGNORE INTO categories (name) VALUES (?)",
-            [(name,) for name in _DEFAULT_CATEGORIES],
+            "INSERT OR IGNORE INTO categories (name, sort_order) VALUES (?, ?)",
+            [(name, i) for i, name in enumerate(_DEFAULT_CATEGORIES)],
+        )
+        conn.execute(
+            "UPDATE categories SET is_misc = 1 "
+            "WHERE id = (SELECT id FROM categories WHERE LOWER(name) = 'other' ORDER BY id LIMIT 1) "
+            "AND NOT EXISTS (SELECT 1 FROM categories WHERE is_misc = 1)"
         )
         conn.execute(
             "INSERT OR IGNORE INTO profile (id, created_at, updated_at) VALUES (1, ?, ?)",
