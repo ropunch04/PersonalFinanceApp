@@ -5,7 +5,7 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
-from services.budget_service import get_budget_summary
+from services.budget_service import _excluded_sql, get_budget_summary
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api")
 
@@ -32,7 +32,7 @@ def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
 
     row = conn.execute(f"""
         SELECT
-            COALESCE(SUM(CASE WHEN direction='outflow' THEN amount ELSE 0 END),0) AS spent,
+            COALESCE(SUM(CASE WHEN direction='outflow' THEN amount - {_excluded_sql()} ELSE 0 END),0) AS spent,
             COALESCE(SUM(CASE WHEN direction='inflow'  THEN amount ELSE 0 END),0) AS income
         FROM transactions WHERE {w_where}
     """, p).fetchone()
@@ -42,7 +42,7 @@ def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
 
     top = conn.execute(f"""
         SELECT c.name AS category_name,
-               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS cat_spent
+               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END),0) AS cat_spent
         FROM categories c
         LEFT JOIN transactions t ON t.category_id = c.id AND {w_join}
         GROUP BY c.id, c.name
@@ -109,7 +109,7 @@ def dashboard_trend():
     rows = conn.execute(f"""
         SELECT
             {group_expr} AS bucket,
-            SUM(CASE WHEN direction = 'outflow' THEN amount ELSE 0 END) AS spent,
+            SUM(CASE WHEN direction = 'outflow' THEN amount - {_excluded_sql()} ELSE 0 END) AS spent,
             SUM(CASE WHEN direction = 'inflow'  THEN amount ELSE 0 END) AS income
         FROM transactions
         WHERE {w}
@@ -170,7 +170,7 @@ def dashboard_merchants():
     top_merchants = conn.execute(f"""
         SELECT
             t.merchant_raw,
-            SUM(t.amount) - COALESCE(SUM(reimb.total_reimb), 0) AS net_spent,
+            SUM(t.amount - {_excluded_sql("t")}) - COALESCE(SUM(reimb.total_reimb), 0) AS net_spent,
             COUNT(t.id)   AS transaction_count,
             AVG(t.amount) AS average_amount
         FROM transactions t
@@ -208,7 +208,7 @@ def dashboard_merchants():
 
     largest = conn.execute(f"""
         SELECT t.merchant_raw,
-               t.amount - COALESCE(reimb.total_reimb, 0) AS net_amount,
+               t.amount - {_excluded_sql("t")} - COALESCE(reimb.total_reimb, 0) AS net_amount,
                t.transaction_at
         FROM transactions t
         LEFT JOIN (
@@ -276,14 +276,14 @@ def dashboard_comparison():
 
     cur_cats = conn.execute(f"""
         SELECT c.id, c.name,
-               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS spent
+               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END),0) AS spent
         FROM categories c
         LEFT JOIN transactions t ON t.category_id=c.id AND {cur_join}
         GROUP BY c.id, c.name
     """, cur_p).fetchall()
-    prev_cats = conn.execute("""
+    prev_cats = conn.execute(f"""
         SELECT c.id,
-               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount ELSE 0 END),0) AS spent
+               COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END),0) AS spent
         FROM categories c
         LEFT JOIN transactions t ON t.category_id=c.id
             AND DATE(t.transaction_at) BETWEEN ? AND ?

@@ -17,7 +17,15 @@ bp = Blueprint("transactions", __name__, url_prefix="/api")
 _TXN_SELECT = """
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
            c.name AS category_name, t.notes, t.transaction_at, t.created_at,
-           t.reimburses_id,
+           t.reimburses_id, t.reimbursement_status, t.reimbursement_mode, t.reimbursement_value,
+           CASE
+               WHEN t.reimbursement_status = 'expensed' THEN t.amount
+               WHEN t.reimbursement_status = 'partial' AND t.reimbursement_mode = 'flat'
+                   THEN MIN(COALESCE(t.reimbursement_value, 0), t.amount)
+               WHEN t.reimbursement_status = 'partial' AND t.reimbursement_mode = 'percent'
+                   THEN t.amount * COALESCE(t.reimbursement_value, 0) / 100.0
+               ELSE 0
+           END AS reimbursement_excluded_amount,
            rt.merchant_raw    AS reimburses_merchant,
            rt.amount          AS reimburses_amount,
            rt.transaction_at  AS reimburses_date,
@@ -194,12 +202,16 @@ def get_transaction(txn_id):
 def update_transaction(txn_id):
     db = get_user_db(g.current_user["user_id"])
 
-    existing = db.execute("SELECT id FROM transactions WHERE id = ?", (txn_id,)).fetchone()
+    existing = db.execute("SELECT id, direction FROM transactions WHERE id = ?", (txn_id,)).fetchone()
     if existing is None:
         return _err("Transaction not found", 404)
 
     body = request.get_json(silent=True) or {}
-    allowed = {"amount", "direction", "merchant_raw", "category_id", "notes", "transaction_at", "reimburses_id"}
+    allowed = {
+        "amount", "direction", "merchant_raw", "category_id", "notes",
+        "transaction_at", "reimburses_id",
+        "reimbursement_status", "reimbursement_mode", "reimbursement_value",
+    }
     updates = {k: v for k, v in body.items() if k in allowed}
 
     if not updates:
@@ -207,6 +219,35 @@ def update_transaction(txn_id):
 
     if "direction" in updates and updates["direction"] not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
+
+    if "reimbursement_status" in updates:
+        status = updates["reimbursement_status"]
+        if status not in (None, "partial", "expensed"):
+            return _err("reimbursement_status must be 'partial', 'expensed', or null", 400)
+        final_direction = updates.get("direction", existing["direction"])
+        if status is not None and final_direction != "outflow":
+            return _err("reimbursement_status can only be set on outflow (debit) transactions", 400)
+        if status == "partial":
+            mode = updates.get("reimbursement_mode")
+            value = updates.get("reimbursement_value")
+            if mode not in ("flat", "percent"):
+                return _err("reimbursement_mode must be 'flat' or 'percent' when status is 'partial'", 400)
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return _err("reimbursement_value must be a number when status is 'partial'", 400)
+            if value < 0 or (mode == "percent" and value > 100):
+                return _err("reimbursement_value out of range", 400)
+            updates["reimbursement_value"] = value
+        elif status == "expensed":
+            updates.setdefault("reimbursement_mode", None)
+            updates.setdefault("reimbursement_value", None)
+        elif status is None:
+            updates.setdefault("reimbursement_mode", None)
+            updates.setdefault("reimbursement_value", None)
+
+    if "reimbursement_mode" in updates and updates["reimbursement_mode"] not in (None, "flat", "percent"):
+        return _err("reimbursement_mode must be 'flat', 'percent', or null", 400)
 
     if "amount" in updates:
         try:
