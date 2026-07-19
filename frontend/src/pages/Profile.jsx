@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
+import CategoryEditModal from "../components/CategoryEditModal";
 
 function EyeIcon({ open }) {
   return open ? (
@@ -51,6 +52,13 @@ export default function Profile({ setup = false }) {
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState(null);
 
+  const [editingCategories, setEditingCategories] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryMsg, setCategoryMsg] = useState(null);
+  const [movingCategory, setMovingCategory] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+
   const [gmailAddress, setGmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [savingGmail, setSavingGmail] = useState(false);
@@ -69,7 +77,7 @@ export default function Profile({ setup = false }) {
     api.getProfile()
       .then((data) => {
         setProfile(data);
-        setBudgets(data.budgets.map((b) => ({ ...b })));
+        setBudgets(data.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
         setGmailAddress(data.gmail_address ?? "");
       })
       .catch((e) => setError(e.message))
@@ -86,6 +94,7 @@ export default function Profile({ setup = false }) {
           category_id: b.category_id,
           amount: parseFloat(b.amount),
           period: b.period ?? "monthly",
+          fold_into_misc: !!b.fold_into_misc,
         })),
       });
       setProfile(updated);
@@ -95,6 +104,81 @@ export default function Profile({ setup = false }) {
       setBudgetMsg(`Error: ${err.message}`);
     } finally {
       setSavingBudget(false);
+    }
+  }
+
+  async function handleSetMisc(categoryId, isMisc) {
+    await api.setMiscCategory(categoryId, isMisc);
+    setBudgets((prev) =>
+      prev.map((b) => ({
+        ...b,
+        is_misc: b.category_id === categoryId ? isMisc : isMisc ? false : b.is_misc,
+      }))
+    );
+  }
+
+  async function handleSaveCategoryEdit(categoryId, updates) {
+    const target = budgets.find((b) => b.category_id === categoryId);
+    const updated = await api.updateProfile({
+      budgets: [{
+        category_id: categoryId,
+        amount: parseFloat(target?.amount) || 0,
+        period: updates.period,
+        fold_into_misc: updates.fold_into_misc,
+      }],
+    });
+    setProfile(updated);
+    setBudgets(updated.budgets.map((b) => ({ ...b, is_misc: !!b.is_misc, fold_into_misc: !!b.fold_into_misc })));
+  }
+
+  async function handleAddCategory(e) {
+    e.preventDefault();
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setAddingCategory(true);
+    setCategoryMsg(null);
+    try {
+      const category = await api.createCategory(name);
+      setBudgets((prev) => [
+        ...prev,
+        {
+          category_id: category.id,
+          category_name: category.name,
+          amount: 0,
+          period: "monthly",
+          fold_into_misc: false,
+          is_misc: false,
+        },
+      ]);
+      setNewCategoryName("");
+    } catch (err) {
+      setCategoryMsg(`Error: ${err.message}`);
+    } finally {
+      setAddingCategory(false);
+    }
+  }
+
+  async function handleDeleteCategory(categoryId) {
+    await api.deleteCategory(categoryId);
+    setBudgets((prev) => prev.filter((b) => b.category_id !== categoryId));
+  }
+
+  async function handleMoveCategory(index, direction) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= budgets.length || movingCategory) return;
+
+    const reordered = [...budgets];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    setBudgets(reordered);
+    setMovingCategory(true);
+    setCategoryMsg(null);
+    try {
+      await api.reorderCategories(reordered.map((b) => b.category_id));
+    } catch (err) {
+      setBudgets(budgets);
+      setCategoryMsg(`Error: ${err.message}`);
+    } finally {
+      setMovingCategory(false);
     }
   }
 
@@ -178,13 +262,69 @@ export default function Profile({ setup = false }) {
         <div className="card">
           <form onSubmit={handleSaveBudget}>
             <div className="form-stack">
-              {budgets.length > 0 && (
-                <div>
-                  <p className="field-label" style={{ marginBottom: 8 }}>Category Budgets</p>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <p className="field-label" style={{ marginBottom: 0 }}>Category Budgets</p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setEditingCategories((v) => !v);
+                      setCategoryMsg(null);
+                      setNewCategoryName("");
+                    }}
+                  >
+                    {editingCategories ? "Done" : "Edit"}
+                  </button>
+                </div>
+
+                {editingCategories && (
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -4, marginBottom: 10 }}>
+                    Pick one category as your Misc/Flex bucket. Spending that goes over any other
+                    category's budget — plus any category you fold in — counts against Misc instead.
+                  </p>
+                )}
+                {budgets.length > 0 && (
                   <div className="budget-list">
                     {budgets.map((b, i) => (
                       <div className="budget-row" key={b.category_id} style={{ alignItems: "center", gap: 8 }}>
-                        <span className="budget-cat">{b.category_name}</span>
+                        {editingCategories && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleMoveCategory(i, -1)}
+                              disabled={i === 0 || movingCategory}
+                              title="Move up"
+                              style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleMoveCategory(i, 1)}
+                              disabled={i === budgets.length - 1 || movingCategory}
+                              title="Move down"
+                              style={{ padding: "0 6px", height: 18, minHeight: 18, fontSize: 10, lineHeight: 1 }}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        )}
+                        <span className="budget-cat">
+                          {b.category_name}
+                          {b.is_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                              MISC
+                            </span>
+                          )}
+                          {!b.is_misc && b.fold_into_misc && (
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--primary)" }}>
+                              FLEX
+                            </span>
+                          )}
+                        </span>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -198,40 +338,54 @@ export default function Profile({ setup = false }) {
                           }
                           placeholder="0.00"
                         />
-                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                          {["monthly", "yearly"].map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              onClick={() =>
-                                setBudgets((prev) =>
-                                  prev.map((item, idx) =>
-                                    idx === i ? { ...item, period: p } : item
-                                  )
-                                )
-                              }
-                              style={{
-                                padding: "3px 8px",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                borderRadius: 6,
-                                border: `1.5px solid ${(b.period ?? "monthly") === p ? "var(--primary)" : "var(--border)"}`,
-                                background: (b.period ?? "monthly") === p ? "rgba(108,99,255,0.15)" : "transparent",
-                                color: (b.period ?? "monthly") === p ? "var(--primary)" : "var(--text-muted)",
-                                cursor: "pointer",
-                                minWidth: "unset",
-                                minHeight: "unset",
-                              }}
-                            >
-                              {p === "monthly" ? "Mo" : "Yr"}
-                            </button>
-                          ))}
-                        </div>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, minWidth: 20 }}>
+                          {b.is_misc ? "" : (b.period ?? "monthly") === "yearly" ? "/yr" : "/mo"}
+                        </span>
+                        {editingCategories && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setEditingCategory(b)}
+                            title="Edit category"
+                            style={{ flexShrink: 0, padding: "0 10px" }}
+                          >
+                            Edit
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+
+                {editingCategories && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="New category name"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddCategory(e);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleAddCategory}
+                      disabled={addingCategory || !newCategoryName.trim()}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {addingCategory ? "Adding…" : "+ Add Category"}
+                    </button>
+                  </div>
+                )}
+
+                {categoryMsg && (
+                  <div className={`msg ${categoryMsg.startsWith("Error") ? "msg-error" : "msg-success"}`} style={{ marginTop: 8 }}>
+                    {categoryMsg}
+                  </div>
+                )}
+              </div>
 
               {budgetMsg && (
                 <div className={`msg ${budgetMsg.startsWith("Error") ? "msg-error" : "msg-success"}`}>
@@ -381,6 +535,16 @@ export default function Profile({ setup = false }) {
           </button>
         </div>
       </div>
+
+      {editingCategory && (
+        <CategoryEditModal
+          category={editingCategory}
+          onClose={() => setEditingCategory(null)}
+          onSave={(updates) => handleSaveCategoryEdit(editingCategory.category_id, updates)}
+          onSetMisc={(isMisc) => handleSetMisc(editingCategory.category_id, isMisc)}
+          onRemove={() => handleDeleteCategory(editingCategory.category_id)}
+        />
+      )}
     </div>
   );
 }

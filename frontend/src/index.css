@@ -5,6 +5,7 @@
   --border: #2e3250;
   --primary: #6c63ff;
   --primary-dim: #3d3880;
+  --primary-glow: rgba(108, 99, 255, 0.35);
   --green: #22c55e;
   --red: #ef4444;
   --amber: #f59e0b;
@@ -34,10 +35,20 @@
   padding: 0;
 }
 
-body {
+html {
   background: var(--bg);
+  overflow-x: hidden;
+}
+
+body {
+  background:
+    radial-gradient(560px 360px at 15% 0%, var(--primary-glow), transparent 70%),
+    radial-gradient(480px 320px at 90% 8%, rgba(108, 99, 255, 0.16), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
   min-height: 100dvh;
   padding-top: var(--safe-top);
+  overflow-x: hidden;
 }
 
 *, *::before, *::after {
@@ -63,7 +74,7 @@ a {
 
 #root {
   min-height: 100dvh;
-  background: var(--bg);
+  background: transparent;
   position: relative;
   max-width: 960px;
   margin: 0 auto;
@@ -442,6 +453,15 @@ select {
   cursor: pointer;
 }
 
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  flex-shrink: 0;
+  appearance: auto;
+  cursor: pointer;
+}
+
 input::placeholder {
   color: var(--text-muted);
 }
@@ -793,6 +813,7 @@ select:focus {
 
 .txn-expanded-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -972,6 +993,7 @@ select:focus {
 .budget-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
@@ -985,6 +1007,7 @@ select:focus {
   font-size: 14px;
   color: var(--text);
   flex: 1;
+  min-width: 120px;
 }
 
 .budget-row input {
@@ -1232,18 +1255,24 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 20px;
 }
 
 .modal-header h2 {
   font-size: 17px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-close {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   background: var(--surface-raised);
