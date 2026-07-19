@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_at TEXT    NOT NULL,
     created_at     TEXT    NOT NULL,
     source_hash    TEXT    UNIQUE,
-    reimburses_id  INTEGER REFERENCES transactions(id)
+    reimburses_id  INTEGER REFERENCES transactions(id),
+    reimbursement_status TEXT CHECK(reimbursement_status IN ('partial', 'expensed')),
+    reimbursement_mode  TEXT CHECK(reimbursement_mode IN ('flat', 'percent')),
+    reimbursement_value REAL
 );
 
 CREATE TABLE IF NOT EXISTS profile (
@@ -83,6 +86,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     try:
         conn.execute("ALTER TABLE budgets ADD COLUMN fold_into_misc INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_status TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_mode TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_value REAL")
         conn.commit()
     except Exception:
         pass  # column already exists

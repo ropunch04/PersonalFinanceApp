@@ -9,6 +9,7 @@ import { useOnline } from "../context/OnlineContext";
 const SOURCE_TYPES = [
   { value: "capitalone", label: "Capital One" },
   { value: "venmo", label: "Venmo" },
+  { value: "amex", label: "Amex" },
 ];
 
 const PAGE_SIZE = 25;
@@ -274,9 +275,9 @@ function ClassifyModal({ categories, onClose, onDone }) {
 
         {merchants.map((m) => (
           <div key={m.prefix} style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{m.prefix}</span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{m.count} transaction{m.count !== 1 ? "s" : ""}</span>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.prefix}</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>{m.count} transaction{m.count !== 1 ? "s" : ""}</span>
             </div>
             <div className="cat-pills">
               {categories.map((c) => (
@@ -505,7 +506,7 @@ const STATUS_OPTIONS = [
 ];
 
 function needsReview(t) {
-  return t.category_id == null;
+  return t.category_id == null && t.direction === "outflow";
 }
 
 function ReclassifyModal({ txn, categories, onClose, onDone }) {
@@ -589,6 +590,10 @@ export default function Transactions() {
   const [showClassify, setShowClassify] = useState(false);
   const [reimburseLinkingTxn, setReimburseLinkingTxn] = useState(null);
   const [reclassifyFrom, setReclassifyFrom] = useState(null);
+  const [statusSavingId, setStatusSavingId] = useState(null);
+  const [partialEditId, setPartialEditId] = useState(null);
+  const [partialMode, setPartialMode] = useState("percent");
+  const [partialValue, setPartialValue] = useState("");
 
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -708,6 +713,48 @@ export default function Transactions() {
     } finally {
       setAssigningId(null);
     }
+  }
+
+  async function handleSetReimbursementStatus(txn, payload) {
+    setStatusSavingId(txn.id);
+    try {
+      const updated = await api.updateTransaction(txn.id, payload);
+      setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setPartialEditId(null);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setStatusSavingId(null);
+    }
+  }
+
+  function handleToggleExpensed(txn) {
+    const next = txn.reimbursement_status === "expensed" ? null : "expensed";
+    handleSetReimbursementStatus(txn, { reimbursement_status: next });
+  }
+
+  function openPartialEditor(txn) {
+    setPartialEditId(txn.id);
+    setPartialMode(txn.reimbursement_mode || "percent");
+    setPartialValue(txn.reimbursement_status === "partial" ? String(txn.reimbursement_value ?? "") : "");
+  }
+
+  function handleSavePartial(txn) {
+    const value = parseFloat(partialValue);
+    if (isNaN(value) || value < 0 || (partialMode === "percent" && value > 100)) {
+      alert(partialMode === "percent" ? "Enter a percent between 0 and 100" : "Enter a valid dollar amount");
+      return;
+    }
+    handleSetReimbursementStatus(txn, {
+      reimbursement_status: "partial",
+      reimbursement_mode: partialMode,
+      reimbursement_value: value,
+    });
+  }
+
+  function handleClearReimbursement(txn) {
+    handleSetReimbursementStatus(txn, { reimbursement_status: null });
+    setPartialEditId(null);
   }
 
   function toggleRow(id) {
@@ -977,9 +1024,9 @@ export default function Transactions() {
                             textTransform: "uppercase",
                             letterSpacing: "0.05em",
                           }}>· Needs Review</span>
-                        ) : (
+                        ) : t.category_name ? (
                           <span> · {t.category_name}</span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
@@ -993,6 +1040,21 @@ export default function Transactions() {
                           padding: "1px 5px", lineHeight: 1.4,
                         }}>
                           Reimb
+                        </span>
+                      )}
+                      {t.direction === "outflow" && t.reimbursement_status && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600,
+                          color: t.reimbursement_status === "expensed" ? "var(--green)" : "var(--amber)",
+                          border: `1px solid ${t.reimbursement_status === "expensed" ? "var(--green)" : "var(--amber)"}`,
+                          borderRadius: 4,
+                          padding: "1px 5px", lineHeight: 1.4,
+                        }}>
+                          {t.reimbursement_status === "expensed"
+                            ? "Expensed"
+                            : t.reimbursement_mode === "percent"
+                            ? `Partial ${t.reimbursement_value}%`
+                            : `Partial $${parseFloat(t.reimbursement_value || 0).toFixed(2)}`}
                         </span>
                       )}
                       {pinnedIds.includes(t.id) && (
@@ -1093,7 +1155,103 @@ export default function Transactions() {
                                 </>
                               );
                             })()}
+                            {t.direction === "outflow" && t.reimbursement_status && (
+                              <>
+                                <dt className="txn-meta-key">Excluded from budget</dt>
+                                <dd className="txn-meta-val" style={{ color: "var(--green)" }}>
+                                  ${parseFloat(t.reimbursement_excluded_amount || 0).toFixed(2)}
+                                  {t.reimbursement_status === "expensed" ? " (fully expensed)" : ` (${
+                                    t.reimbursement_mode === "percent" ? `${t.reimbursement_value}%` : `$${t.reimbursement_value}`
+                                  } partial)`}
+                                </dd>
+                              </>
+                            )}
                           </dl>
+                          {t.direction === "outflow" && (
+                            <div style={{ marginTop: 10 }}>
+                              <p className="field-label" style={{ marginBottom: 8 }}>Expensed / reimbursed?</p>
+                              <div className="cat-pills">
+                                <button
+                                  className={`cat-pill${statusSavingId === t.id ? " saving" : ""}`}
+                                  style={t.reimbursement_status === "expensed"
+                                    ? { borderColor: "var(--green)", color: "var(--green)" }
+                                    : {}}
+                                  disabled={statusSavingId === t.id}
+                                  onClick={(e) => { e.stopPropagation(); handleToggleExpensed(t); }}
+                                >
+                                  {t.reimbursement_status === "expensed" ? "✓ Expensed" : "Expensed"}
+                                </button>
+                                <button
+                                  className={`cat-pill${statusSavingId === t.id ? " saving" : ""}`}
+                                  style={t.reimbursement_status === "partial"
+                                    ? { borderColor: "var(--amber)", color: "var(--amber)" }
+                                    : {}}
+                                  disabled={statusSavingId === t.id}
+                                  onClick={(e) => { e.stopPropagation(); openPartialEditor(t); }}
+                                >
+                                  {t.reimbursement_status === "partial"
+                                    ? `✓ Partial (${t.reimbursement_mode === "percent" ? `${t.reimbursement_value}%` : `$${t.reimbursement_value}`})`
+                                    : "Partial…"}
+                                </button>
+                                {t.reimbursement_status && (
+                                  <button
+                                    className="cat-pill"
+                                    disabled={statusSavingId === t.id}
+                                    onClick={(e) => { e.stopPropagation(); handleClearReimbursement(t); }}
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                              {partialEditId === t.id && (
+                                <div
+                                  style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <select
+                                    value={partialMode}
+                                    onChange={(e) => setPartialMode(e.target.value)}
+                                    style={{
+                                      padding: "8px 10px", borderRadius: 8,
+                                      border: "1px solid var(--border)", background: "var(--surface-raised)",
+                                      color: "var(--text)", fontSize: 13,
+                                    }}
+                                  >
+                                    <option value="percent">%</option>
+                                    <option value="flat">$ flat</option>
+                                  </select>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0"
+                                    max={partialMode === "percent" ? 100 : undefined}
+                                    step="0.01"
+                                    placeholder={partialMode === "percent" ? "e.g. 75" : "e.g. 20.00"}
+                                    value={partialValue}
+                                    onChange={(e) => setPartialValue(e.target.value)}
+                                    style={{
+                                      flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 8,
+                                      border: "1px solid var(--border)", background: "var(--surface-raised)",
+                                      color: "var(--text)", fontSize: 13,
+                                    }}
+                                  />
+                                  <button
+                                    className="btn btn-sm"
+                                    disabled={statusSavingId === t.id}
+                                    onClick={() => handleSavePartial(t)}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => setPartialEditId(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="txn-expanded-actions">
                             <button
                               className="btn btn-ghost btn-sm"
