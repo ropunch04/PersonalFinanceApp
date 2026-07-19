@@ -2,6 +2,8 @@ import csv
 import hashlib
 from datetime import datetime
 
+from services.categorize import resolve_category_id
+
 _CAPITALONE_SKIP = ("AUTOPAY PYMT", "MOBILE PYMT")
 _AMEX_SKIP = ("AUTOPAY PAYMENT",)
 
@@ -14,10 +16,7 @@ def _source_hash(
 
 
 def _get_category_id(conn, merchant_raw: str) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
-    ).fetchone()
-    return row["id"] if row else None
+    return resolve_category_id(conn, merchant_raw)
 
 
 def _parse_amount(raw: str) -> float:
