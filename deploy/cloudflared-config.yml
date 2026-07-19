@@ -1,0 +1,20 @@
+# Cloudflare Tunnel config template for trackmyspend.xyz
+#
+# 1. Run `cloudflared tunnel create finance-app` — it prints a Tunnel ID (a UUID)
+#    and writes /home/rohitpras/.cloudflared/<TUNNEL_ID>.json (the credentials).
+# 2. Replace <TUNNEL_ID> below (both places) with that UUID.
+# 3. Copy this file to /home/rohitpras/.cloudflared/config.yml
+#
+# If a tunnel already exists on the Pi (check with `cloudflared tunnel list`),
+# use its existing ID/credentials instead of creating a new one.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /home/rohitpras/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: trackmyspend.xyz
+    service: http://localhost:5100
+  - hostname: www.trackmyspend.xyz
+    service: http://localhost:5100
+  # Anything that is not trackmyspend.xyz gets a 404 (never proxied to the app)
+  - service: http_status:404

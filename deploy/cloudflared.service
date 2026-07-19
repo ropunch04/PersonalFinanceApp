@@ -1,5 +1,5 @@
 [Unit]
-Description=Cloudflare Tunnel (finance-app)
+Description=Cloudflare Tunnel (trackmyspend.xyz)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,14 +7,20 @@ Wants=network-online.target
 Type=simple
 
 User=rohitpras
-# Replace finance-app with the tunnel name you used in: cloudflared tunnel create <name>
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run finance-app
+# Tunnel name must match: cloudflared tunnel create finance-app
+# Config lives at /home/rohitpras/.cloudflared/config.yml (see deploy/cloudflared-config.yml)
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --config /home/rohitpras/.cloudflared/config.yml run finance-app
 
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=cloudflared
+
+# Hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target
