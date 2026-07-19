@@ -5,6 +5,7 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
+from services.categorize import resolve_category_id
 
 
 def _merchant_prefix(name: str) -> str:
@@ -152,6 +153,10 @@ def create_transaction():
 
     created_at = datetime.now(timezone.utc).isoformat()
 
+    category_id = body.get("category_id")
+    if category_id is None and body.get("merchant_raw"):
+        category_id = resolve_category_id(db, body.get("merchant_raw"))
+
     cur = db.execute(
         """
         INSERT INTO transactions
@@ -162,7 +167,7 @@ def create_transaction():
             amount,
             body.get("merchant_raw"),
             direction,
-            body.get("category_id"),
+            category_id,
             body.get("notes"),
             transaction_at,
             created_at,

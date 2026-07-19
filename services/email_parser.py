@@ -9,6 +9,8 @@ from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
+from services.categorize import resolve_category_id
+
 logger = logging.getLogger(__name__)
 
 _IMAP_HOST = "imap.gmail.com"
@@ -351,10 +353,7 @@ def _parse_zelle_email(msg: Message, message_id: str, conn) -> dict | None:
 
 
 def _get_category_id(conn, merchant_raw: str) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
-    ).fetchone()
-    return row["id"] if row else None
+    return resolve_category_id(conn, merchant_raw)
 
 
 def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list[dict], list[dict]]:
