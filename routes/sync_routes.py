@@ -4,18 +4,11 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
+from routes.helpers import _err, _ok
 from services.encryption_service import encrypt
 from services.sync_service import sync_user
 
 bp = Blueprint("sync", __name__, url_prefix="/api")
-
-
-def _ok(data):
-    return {"data": data, "error": None}
-
-
-def _err(message, status):
-    return {"data": None, "error": message}, status
 
 
 @bp.put("/profile/gmail")

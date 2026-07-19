@@ -4,16 +4,9 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
+from routes.helpers import _err, _ok
 
 bp = Blueprint("profile", __name__, url_prefix="/api")
-
-
-def _ok(data):
-    return {"data": data, "error": None}
-
-
-def _err(message, status):
-    return {"data": None, "error": message}, status
 
 
 def _fetch_profile(conn) -> dict:

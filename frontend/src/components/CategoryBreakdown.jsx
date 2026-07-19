@@ -1,13 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { fmtCurrency } from "../format";
+const fmt = (n) => fmtCurrency(n);
 
-function fmt(n) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n ?? 0);
-}
+
 
 function barColor(ratio) {
   if (ratio >= 1)    return "#EF4444";

@@ -18,18 +18,11 @@ from models.user import (
     update_password,
     update_user,
 )
+from routes.helpers import _err, _ok
 from runtime_state import APP_START_TIME
 from services import sync_service
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
-
-
-def _ok(data):
-    return {"data": data, "error": None}
-
-
-def _err(message, status):
-    return {"data": None, "error": message}, status
 
 
 def _user_with_finance(user: dict) -> dict:

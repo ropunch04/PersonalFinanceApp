@@ -52,10 +52,6 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/api/dashboard${qs ? `?${qs}` : ""}`);
   },
-  dashboard: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return request("GET", `/api/dashboard${qs ? `?${qs}` : ""}`);
-  },
 
   getDuplicates: () => request("GET", "/api/transactions/duplicates"),
 
@@ -69,10 +65,6 @@ export const api = {
     request("PUT", `/api/transactions/${inflowId}`, { reimburses_id: null }),
 
   getTransactions: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return request("GET", `/api/transactions${qs ? `?${qs}` : ""}`);
-  },
-  transactions: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/api/transactions${qs ? `?${qs}` : ""}`);
   },
@@ -92,26 +84,15 @@ export const api = {
     request("POST", "/api/transactions/auto-classify"),
 
   getCategories: () => request("GET", "/api/categories"),
-  categories: () => request("GET", "/api/categories"),
   createCategory: (name) => request("POST", "/api/categories", { name }),
   deleteCategory: (id) => request("DELETE", `/api/categories/${id}`),
   reorderCategories: (order) => request("PUT", "/api/categories/reorder", { order }),
   setMiscCategory: (id, is_misc) => request("PUT", `/api/categories/${id}/misc`, { is_misc }),
 
-  queue: () => request("GET", "/api/queue"),
-  confirm: (id, data) => request("PUT", `/api/transactions/${id}`, { ...data, status: "confirmed" }),
-  ignore: (id) => request("PUT", `/api/transactions/${id}`, { status: "ignored" }),
-  autoCategorize: () => request("POST", "/api/transactions/auto-classify"),
-
-  insights: () => request("GET", "/api/insights"),
-  weeklyInsight: (offset = 0) => request("GET", `/api/insights/weekly?offset=${offset}`),
-  monthlyInsight: (year, month) => request("GET", `/api/insights/monthly?year=${year}&month=${month}`),
-
   getProfile: () => request("GET", "/api/profile"),
   updateProfile: (data) => request("PUT", "/api/profile", data),
   updateGmail: (data) => request("PUT", "/api/profile/gmail", data),
 
-  sync: () => request("POST", "/api/sync"),
   syncNow: () => request("POST", "/api/sync"),
   syncStatus: () => request("GET", "/api/sync/status"),
 

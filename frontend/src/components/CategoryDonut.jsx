@@ -1,4 +1,7 @@
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
+import { fmtCurrency } from "../format";
+const fmt = (n) => fmtCurrency(n);
+
 
 const CATEGORY_COLORS = {
   Food:          "#6C63FF",
@@ -18,11 +21,6 @@ function getColor(name, index) {
   return CATEGORY_COLORS[name] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
-function fmt(n) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", maximumFractionDigits: 0,
-  }).format(n ?? 0);
-}
 
 export default function CategoryDonut({ categories, selectedId, onSelect }) {
   const slices = (categories ?? []).filter((c) => c.spent > 0);

@@ -1,24 +1,35 @@
-"""Merchant-history-based category inference.
+"""Merchant identity and history-based category inference.
 
-When a new transaction arrives (CSV import, Gmail sync, or manual entry
-without a category), infer its category from how the user categorized the
-same merchant before. Matching is exact first, then by prefix: a match
-counts when one merchant string is a prefix of the other, since bank
-strings append store/order numbers ("AMAZON MKTPL*2K41XY" vs "AMAZON").
-Venmo person-to-person rows are excluded from learning — paying the same
-person again says nothing about the purpose.
+This module owns the single definition of "same merchant" used everywhere:
+
+- `merchant_prefix()` normalizes a raw bank string to its merchant group by
+  stripping trailing store/order numbers ("TRADER JOES #552" -> "TRADER JOES").
+  The bulk-classify endpoints group and apply by this key.
+- `resolve_category_id()` infers a category for a new transaction from how the
+  user categorized that merchant before. Matching tiers, best first: exact
+  string, one string is a prefix of the other, same merchant_prefix() group.
+  Venmo person-to-person rows are excluded from learning — paying the same
+  person again says nothing about the purpose.
 """
+
+import re
 
 _MIN_PREFIX_LEN = 5  # a non-exact match must overlap at least this much
 # (5 keeps bare processor prefixes like "SQ *" or "TST*" from matching everything)
 
 
-def infer_category_id(conn, merchant_raw: str) -> int | None:
-    if not merchant_raw:
+def merchant_prefix(name: str) -> str:
+    cleaned = re.sub(r"\s+[#*]?\d{3,}.*$", "", name.strip()).strip()
+    return cleaned if cleaned else name.strip()
+
+
+def resolve_category_id(conn, merchant_raw: str) -> int | None:
+    if conn is None or not merchant_raw:
         return None
     target = merchant_raw.strip().upper()
     if not target:
         return None
+    target_group = merchant_prefix(merchant_raw).upper()
 
     rows = conn.execute(
         """
@@ -43,6 +54,11 @@ def infer_category_id(conn, merchant_raw: str) -> int | None:
             common = min(len(known), len(target))
             if common < _MIN_PREFIX_LEN:
                 continue
+        elif target_group and merchant_prefix(row["merchant_raw"]).upper() == target_group:
+            # Same store, different location/order number — group them.
+            common = len(target_group)
+            if common < _MIN_PREFIX_LEN:
+                continue
         else:
             continue
         # Longest overlap wins; ties break by how often, then how recently,
@@ -52,16 +68,3 @@ def infer_category_id(conn, merchant_raw: str) -> int | None:
             best_rank = rank
             best_category = row["category_id"]
     return best_category
-
-
-def resolve_category_id(conn, merchant_raw: str) -> int | None:
-    """History-based inference first, then the legacy merchant==category-name match."""
-    if conn is None or not merchant_raw:
-        return None
-    inferred = infer_category_id(conn, merchant_raw)
-    if inferred is not None:
-        return inferred
-    row = conn.execute(
-        "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
-    ).fetchone()
-    return row["id"] if row else None

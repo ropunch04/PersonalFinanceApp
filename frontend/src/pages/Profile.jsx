@@ -202,7 +202,7 @@ export default function Profile({ setup = false }) {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const result = await api.sync();
+      const result = await api.syncNow();
       setSyncMsg(`Synced: ${result.imported ?? 0} imported, ${result.duplicates_skipped ?? 0} skipped.`);
     } catch (err) {
       setSyncMsg(`Error: ${err.message}`);
