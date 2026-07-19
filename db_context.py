@@ -141,8 +141,12 @@ def init_user_db(user_id: int) -> None:
     Path("data").mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(get_db_path(user_id), timeout=15)
     try:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
+        # Login calls this for existing DBs too — bring them up to the current
+        # schema before the seed statements below reference new columns.
+        _migrate(conn)
         now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
             "INSERT OR IGNORE INTO categories (name, sort_order) VALUES (?, ?)",
