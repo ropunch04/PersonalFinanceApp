@@ -22,17 +22,21 @@ def _fetch_profile(conn) -> dict:
     ).fetchone()
     budgets = conn.execute(
         """
-        SELECT b.category_id, c.name AS category_name, b.amount, b.period
+        SELECT b.category_id, c.name AS category_name, b.amount, b.period,
+               b.fold_into_misc, c.is_misc
         FROM budgets b
         JOIN categories c ON c.id = b.category_id
-        ORDER BY c.name
+        ORDER BY c.sort_order, c.id
         """
     ).fetchall()
     return {
         "gmail_address": row["gmail_address"] if row else None,
         "gmail_configured": bool(row["gmail_address"]) if row else False,
         "last_synced_at": row["last_synced_at"] if row else None,
-        "budgets": [dict(b) for b in budgets],
+        "budgets": [
+            {**dict(b), "is_misc": bool(b["is_misc"]), "fold_into_misc": bool(b["fold_into_misc"])}
+            for b in budgets
+        ],
     }
 
 
@@ -66,13 +70,14 @@ def update_profile():
             category_id = entry.get("category_id")
             amount = entry.get("amount")
             period = entry.get("period", "monthly")
+            fold_into_misc = bool(entry.get("fold_into_misc", False))
             if category_id is None or amount is None:
                 return _err("Each budget entry must include category_id and amount", 400)
             if period not in ("monthly", "yearly"):
                 return _err("period must be 'monthly' or 'yearly'", 400)
             conn.execute(
-                "UPDATE budgets SET amount = ?, period = ? WHERE category_id = ?",
-                (amount, period, category_id),
+                "UPDATE budgets SET amount = ?, period = ?, fold_into_misc = ? WHERE category_id = ?",
+                (amount, period, int(fold_into_misc), category_id),
             )
 
     conn.commit()

@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 import bcrypt
 from flask import Blueprint, g, request
 
-from limiter import limiter
 from auth.jwt_utils import encode_token
 from auth.middleware import require_auth
 from db_context import init_user_db
+from limiter import limiter
 from models.user import (
     _connect,
     create_user,

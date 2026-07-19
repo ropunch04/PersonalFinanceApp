@@ -63,7 +63,7 @@ def list_transactions():
     params: list = []
 
     if uncategorized or status == "pending":
-        where_clauses.append("t.category_id IS NULL")
+        where_clauses.append("t.category_id IS NULL AND t.direction = 'outflow'")
     elif status == "confirmed":
         where_clauses.append("t.category_id IS NOT NULL")
     elif category_id is not None:
@@ -251,7 +251,9 @@ def delete_transaction(txn_id):
 def unclassified_merchants():
     db = get_user_db(g.current_user["user_id"])
     rows = db.execute(
-        "SELECT merchant_raw, COUNT(*) as count FROM transactions WHERE category_id IS NULL AND (notes IS NULL OR notes NOT LIKE 'venmo:%') GROUP BY merchant_raw"
+        "SELECT merchant_raw, COUNT(*) as count FROM transactions "
+        "WHERE category_id IS NULL AND direction = 'outflow' AND (notes IS NULL OR notes NOT LIKE 'venmo:%') "
+        "GROUP BY merchant_raw"
     ).fetchall()
 
     groups: dict[str, dict] = {}
@@ -270,7 +272,8 @@ def auto_classify():
     db = get_user_db(g.current_user["user_id"])
 
     uncategorized = db.execute(
-        "SELECT id, merchant_raw FROM transactions WHERE category_id IS NULL AND (notes IS NULL OR notes NOT LIKE 'venmo:%')"
+        "SELECT id, merchant_raw FROM transactions "
+        "WHERE category_id IS NULL AND direction = 'outflow' AND (notes IS NULL OR notes NOT LIKE 'venmo:%')"
     ).fetchall()
 
     if not uncategorized:
