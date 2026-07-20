@@ -2,6 +2,25 @@ import sqlite3
 from datetime import date
 
 
+# Portion of an outflow's amount that's covered elsewhere (expensed/reimbursed)
+# and should not count against the user's own spend/budget totals.
+def _excluded_sql(prefix: str = "") -> str:
+    p = f"{prefix}." if prefix else ""
+    return f"""
+        CASE
+            WHEN {p}reimbursement_status = 'expensed' THEN {p}amount
+            WHEN {p}reimbursement_status = 'partial' AND {p}reimbursement_mode = 'flat'
+                THEN MIN(COALESCE({p}reimbursement_value, 0), {p}amount)
+            WHEN {p}reimbursement_status = 'partial' AND {p}reimbursement_mode = 'percent'
+                THEN {p}amount * COALESCE({p}reimbursement_value, 0) / 100.0
+            ELSE 0
+        END
+    """
+
+
+_EXCLUDED_SQL = _excluded_sql()
+
+
 def get_budget_summary(
     conn: sqlite3.Connection,
     start_date: str = None,
@@ -27,7 +46,7 @@ def get_budget_summary(
 
     totals = conn.execute(f"""
         SELECT
-            COALESCE(SUM(CASE WHEN direction = 'outflow' THEN amount ELSE 0 END), 0) AS total_spent,
+            COALESCE(SUM(CASE WHEN direction = 'outflow' THEN amount - {_EXCLUDED_SQL} ELSE 0 END), 0) AS total_spent,
             COALESCE(SUM(CASE WHEN direction = 'inflow'  THEN amount ELSE 0 END), 0) AS total_income
         FROM transactions
         WHERE {w_where}
@@ -58,7 +77,7 @@ def get_budget_summary(
             COALESCE(b.fold_into_misc, 0) AS fold_into_misc,
             COALESCE(b.period, 'monthly') AS period,
             COALESCE(SUM(
-                CASE WHEN t.direction = 'outflow' THEN  t.amount
+                CASE WHEN t.direction = 'outflow' THEN  t.amount - {_excluded_sql("t")}
                      WHEN t.direction = 'inflow'  THEN -t.amount
                      ELSE 0 END
             ), 0) AS spent,

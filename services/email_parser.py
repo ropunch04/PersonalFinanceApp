@@ -9,6 +9,8 @@ from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
+from services.categorize import resolve_category_id
+
 logger = logging.getLogger(__name__)
 
 _IMAP_HOST = "imap.gmail.com"
@@ -174,7 +176,7 @@ def _parse_charge_email(msg: Message, message_id: str, conn) -> dict | None:
         "amount": amount,
         "direction": "outflow",
         "merchant_raw": merchant_raw,
-        "category_id": _get_category_id(conn, merchant_raw) if conn else None,
+        "category_id": resolve_category_id(conn, merchant_raw) if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("capitalone_charge", message_id),
         "notes": None,
@@ -209,7 +211,7 @@ def _parse_credit_email(msg: Message, message_id: str, conn) -> dict | None:
         "amount": amount,
         "direction": "inflow",
         "merchant_raw": merchant_raw,
-        "category_id": _get_category_id(conn, merchant_raw) if conn else None,
+        "category_id": resolve_category_id(conn, merchant_raw) if conn else None,
         "transaction_at": transaction_at,
         "source_hash": _source_hash("capitalone_credit", message_id),
         "notes": "Refund",
@@ -267,7 +269,7 @@ def _parse_venmo_email(msg: Message, message_id: str, conn) -> dict | None:
         "amount": amount,
         "direction": direction,
         "merchant_raw": memo,
-        "category_id": _get_category_id(conn, memo) if conn else None,
+        "category_id": resolve_category_id(conn, memo) if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("venmo_email", message_id),
         "notes": notes,
@@ -296,7 +298,7 @@ def _parse_amex_email(msg: Message, message_id: str, conn) -> dict | None:
         "amount": amount,
         "direction": "outflow",
         "merchant_raw": merchant_raw,
-        "category_id": _get_category_id(conn, merchant_raw) if conn else None,
+        "category_id": resolve_category_id(conn, merchant_raw) if conn else None,
         "transaction_at": _parse_cap1_date(text),
         "source_hash": _source_hash("amex_purchase", message_id),
         "notes": None,
@@ -326,7 +328,7 @@ def _parse_zelle_email(msg: Message, message_id: str, conn) -> dict | None:
             "amount": amount,
             "direction": "inflow",
             "merchant_raw": person,
-            "category_id": _get_category_id(conn, person) if conn else None,
+            "category_id": resolve_category_id(conn, person) if conn else None,
             "transaction_at": transaction_at,
             "source_hash": _source_hash("zelle_received", message_id),
             "notes": f"zelle:received:{person}",
@@ -343,18 +345,11 @@ def _parse_zelle_email(msg: Message, message_id: str, conn) -> dict | None:
         "amount": amount,
         "direction": "outflow",
         "merchant_raw": recipient,
-        "category_id": _get_category_id(conn, recipient) if conn else None,
+        "category_id": resolve_category_id(conn, recipient) if conn else None,
         "transaction_at": transaction_at,
         "source_hash": _source_hash("zelle_sent", message_id),
         "notes": f"zelle:sent:{recipient}",
     }
-
-
-def _get_category_id(conn, merchant_raw: str) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
-    ).fetchone()
-    return row["id"] if row else None
 
 
 def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list[dict], list[dict]]:

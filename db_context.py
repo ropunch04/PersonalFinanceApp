@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_at TEXT    NOT NULL,
     created_at     TEXT    NOT NULL,
     source_hash    TEXT    UNIQUE,
-    reimburses_id  INTEGER REFERENCES transactions(id)
+    reimburses_id  INTEGER REFERENCES transactions(id),
+    reimbursement_status TEXT CHECK(reimbursement_status IN ('partial', 'expensed')),
+    reimbursement_mode  TEXT CHECK(reimbursement_mode IN ('flat', 'percent')),
+    reimbursement_value REAL
 );
 
 CREATE TABLE IF NOT EXISTS profile (
@@ -87,6 +90,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except Exception:
         pass  # column already exists
 
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_status TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_mode TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_value REAL")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
     rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()
     distinct_orders = conn.execute("SELECT COUNT(DISTINCT sort_order) AS n FROM categories").fetchone()["n"]
     if len(rows) > 1 and distinct_orders <= 1:
@@ -120,8 +141,12 @@ def init_user_db(user_id: int) -> None:
     Path("data").mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(get_db_path(user_id), timeout=15)
     try:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
+        # Login calls this for existing DBs too — bring them up to the current
+        # schema before the seed statements below reference new columns.
+        _migrate(conn)
         now = datetime.now(timezone.utc).isoformat()
         conn.executemany(
             "INSERT OR IGNORE INTO categories (name, sort_order) VALUES (?, ?)",

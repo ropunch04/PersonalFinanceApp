@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { fmtCurrency } from "../format";
+const fmt = (n) => fmtCurrency(n, 2);
 
-function fmt(n) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", maximumFractionDigits: 2,
-  }).format(n ?? 0);
-}
+
 
 function fmtDate(s) {
   if (!s) return "";

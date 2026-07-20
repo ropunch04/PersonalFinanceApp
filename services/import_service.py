@@ -2,6 +2,8 @@ import csv
 import hashlib
 from datetime import datetime
 
+from services.categorize import resolve_category_id
+
 _CAPITALONE_SKIP = ("AUTOPAY PYMT", "MOBILE PYMT")
 _AMEX_SKIP = ("AUTOPAY PAYMENT",)
 
@@ -11,13 +13,6 @@ def _source_hash(
 ) -> str:
     raw = f"{provider}|{transaction_at}|{amount}|{merchant_raw}|{row_num}"
     return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def _get_category_id(conn, merchant_raw: str) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM categories WHERE LOWER(name) = LOWER(?)", (merchant_raw,)
-    ).fetchone()
-    return row["id"] if row else None
 
 
 def _parse_amount(raw: str) -> float:
@@ -55,7 +50,7 @@ def parse_capitalone_csv(stream, conn) -> tuple[list[dict], list[dict]]:
                     "amount": amount,
                     "direction": direction,
                     "merchant_raw": description,
-                    "category_id": _get_category_id(conn, description),
+                    "category_id": resolve_category_id(conn, description),
                     "transaction_at": transaction_at,
                     "source_hash": _source_hash(
                         "capitalone", transaction_at, amount, description, row_num
@@ -99,7 +94,7 @@ def parse_amex_csv(stream, conn) -> tuple[list[dict], list[dict]]:
                     "amount": amount,
                     "direction": direction,
                     "merchant_raw": description,
-                    "category_id": _get_category_id(conn, description),
+                    "category_id": resolve_category_id(conn, description),
                     "transaction_at": transaction_at,
                     "source_hash": _source_hash(
                         "amex", transaction_at, amount, description, dedup_key
@@ -163,7 +158,7 @@ def parse_venmo_csv(stream, conn) -> tuple[list[dict], list[dict]]:
                     "amount": amount,
                     "direction": direction,
                     "merchant_raw": merchant_raw,
-                    "category_id": _get_category_id(conn, merchant_raw),
+                    "category_id": resolve_category_id(conn, merchant_raw),
                     "transaction_at": transaction_at,
                     "source_hash": _source_hash(
                         "venmo", transaction_at, amount, merchant_raw, row_num

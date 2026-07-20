@@ -4,12 +4,8 @@ import {
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import { api } from "../api";
+import { fmtCurrency } from "../format";
 
-function fmtCurrency(n) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", maximumFractionDigits: 0,
-  }).format(n ?? 0);
-}
 
 function fmtLabel(dateStr) {
   try {

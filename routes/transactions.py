@@ -1,22 +1,20 @@
-import re
 from datetime import datetime, timezone
 
 from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
-
-
-def _merchant_prefix(name: str) -> str:
-    cleaned = re.sub(r"\s+[#*]?\d{3,}.*$", "", name.strip()).strip()
-    return cleaned if cleaned else name.strip()
+from routes.helpers import _err, _ok
+from services.budget_service import _excluded_sql
+from services.categorize import merchant_prefix, resolve_category_id
 
 bp = Blueprint("transactions", __name__, url_prefix="/api")
 
-_TXN_SELECT = """
+_TXN_SELECT = f"""
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
            c.name AS category_name, t.notes, t.transaction_at, t.created_at,
-           t.reimburses_id,
+           t.reimburses_id, t.reimbursement_status, t.reimbursement_mode, t.reimbursement_value,
+           {_excluded_sql("t")} AS reimbursement_excluded_amount,
            rt.merchant_raw    AS reimburses_merchant,
            rt.amount          AS reimburses_amount,
            rt.transaction_at  AS reimburses_date,
@@ -26,14 +24,6 @@ _TXN_SELECT = """
     LEFT JOIN categories c  ON t.category_id = c.id
     LEFT JOIN transactions rt ON rt.id = t.reimburses_id
 """
-
-
-def _ok(data):
-    return {"data": data, "error": None}
-
-
-def _err(message, status):
-    return {"data": None, "error": message}, status
 
 
 def _row_to_dict(row) -> dict:
@@ -152,6 +142,10 @@ def create_transaction():
 
     created_at = datetime.now(timezone.utc).isoformat()
 
+    category_id = body.get("category_id")
+    if category_id is None and body.get("merchant_raw"):
+        category_id = resolve_category_id(db, body.get("merchant_raw"))
+
     cur = db.execute(
         """
         INSERT INTO transactions
@@ -162,7 +156,7 @@ def create_transaction():
             amount,
             body.get("merchant_raw"),
             direction,
-            body.get("category_id"),
+            category_id,
             body.get("notes"),
             transaction_at,
             created_at,
@@ -189,12 +183,18 @@ def get_transaction(txn_id):
 def update_transaction(txn_id):
     db = get_user_db(g.current_user["user_id"])
 
-    existing = db.execute("SELECT id FROM transactions WHERE id = ?", (txn_id,)).fetchone()
+    existing = db.execute(
+        "SELECT id, direction, reimbursement_status FROM transactions WHERE id = ?", (txn_id,)
+    ).fetchone()
     if existing is None:
         return _err("Transaction not found", 404)
 
     body = request.get_json(silent=True) or {}
-    allowed = {"amount", "direction", "merchant_raw", "category_id", "notes", "transaction_at", "reimburses_id"}
+    allowed = {
+        "amount", "direction", "merchant_raw", "category_id", "notes",
+        "transaction_at", "reimburses_id",
+        "reimbursement_status", "reimbursement_mode", "reimbursement_value",
+    }
     updates = {k: v for k, v in body.items() if k in allowed}
 
     if not updates:
@@ -202,6 +202,47 @@ def update_transaction(txn_id):
 
     if "direction" in updates and updates["direction"] not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
+
+    if "reimbursement_status" in updates:
+        status = updates["reimbursement_status"]
+        if status not in (None, "partial", "expensed"):
+            return _err("reimbursement_status must be 'partial', 'expensed', or null", 400)
+        final_direction = updates.get("direction", existing["direction"])
+        if status is not None and final_direction != "outflow":
+            return _err("reimbursement_status can only be set on outflow (debit) transactions", 400)
+        if status is not None:
+            # A transaction is reimbursed by linked inflows OR by a status —
+            # never both, or every metric would subtract the money twice.
+            linked = db.execute(
+                "SELECT COUNT(*) AS n FROM transactions WHERE reimburses_id = ?", (txn_id,)
+            ).fetchone()["n"]
+            if linked > 0:
+                return _err(
+                    "This transaction already has linked reimbursement payments — "
+                    "unlink those first, or keep using linked reimbursements for it",
+                    409,
+                )
+        if status == "partial":
+            mode = updates.get("reimbursement_mode")
+            value = updates.get("reimbursement_value")
+            if mode not in ("flat", "percent"):
+                return _err("reimbursement_mode must be 'flat' or 'percent' when status is 'partial'", 400)
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return _err("reimbursement_value must be a number when status is 'partial'", 400)
+            if value < 0 or (mode == "percent" and value > 100):
+                return _err("reimbursement_value out of range", 400)
+            updates["reimbursement_value"] = value
+        elif status == "expensed":
+            updates.setdefault("reimbursement_mode", None)
+            updates.setdefault("reimbursement_value", None)
+        elif status is None:
+            updates.setdefault("reimbursement_mode", None)
+            updates.setdefault("reimbursement_value", None)
+
+    if "reimbursement_mode" in updates and updates["reimbursement_mode"] not in (None, "flat", "percent"):
+        return _err("reimbursement_mode must be 'flat', 'percent', or null", 400)
 
     if "amount" in updates:
         try:
@@ -215,12 +256,18 @@ def update_transaction(txn_id):
             if rid == txn_id:
                 return _err("A transaction cannot reimburse itself", 400)
             target = db.execute(
-                "SELECT id, direction FROM transactions WHERE id = ?", (rid,)
+                "SELECT id, direction, reimbursement_status FROM transactions WHERE id = ?", (rid,)
             ).fetchone()
             if target is None:
                 return _err("Linked transaction not found", 404)
             if target["direction"] != "outflow":
                 return _err("reimburses_id must point to an outflow transaction", 400)
+            if target["reimbursement_status"] is not None:
+                return _err(
+                    "That transaction is already marked expensed/partially reimbursed — "
+                    "clear its reimbursement status before linking payments to it",
+                    409,
+                )
 
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     values = list(updates.values()) + [txn_id]
@@ -258,7 +305,7 @@ def unclassified_merchants():
 
     groups: dict[str, dict] = {}
     for row in rows:
-        prefix = _merchant_prefix(row["merchant_raw"])
+        prefix = merchant_prefix(row["merchant_raw"])
         if prefix not in groups:
             groups[prefix] = {"prefix": prefix, "count": 0, "example": row["merchant_raw"]}
         groups[prefix]["count"] += row["count"]
@@ -281,7 +328,7 @@ def auto_classify():
 
     prefix_groups: dict[str, list[int]] = {}
     for row in uncategorized:
-        prefix = _merchant_prefix(row["merchant_raw"])
+        prefix = merchant_prefix(row["merchant_raw"])
         prefix_groups.setdefault(prefix, []).append(row["id"])
 
     classified = 0
@@ -325,7 +372,7 @@ def bulk_categorize():
     if not merchant_raw or category_id is None:
         return _err("merchant_raw and category_id are required", 400)
 
-    prefix = _merchant_prefix(merchant_raw)
+    prefix = merchant_prefix(merchant_raw)
     result = db.execute(
         "UPDATE transactions SET category_id = ? WHERE category_id IS NULL AND merchant_raw LIKE ?",
         (category_id, f"{prefix}%"),
@@ -348,7 +395,7 @@ def reclassify():
     if from_id == to_id:
         return _err("from and to categories must differ", 400)
 
-    prefix = _merchant_prefix(merchant_raw)
+    prefix = merchant_prefix(merchant_raw)
     result = db.execute(
         "UPDATE transactions SET category_id = ? WHERE category_id = ? AND merchant_raw LIKE ?",
         (to_id, from_id, f"{prefix}%"),
