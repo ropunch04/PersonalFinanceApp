@@ -59,10 +59,12 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/api/transactions/linkable-outflows${qs ? `?${qs}` : ""}`);
   },
-  linkReimbursement: (inflowId, outflowId) =>
-    request("PUT", `/api/transactions/${inflowId}`, { reimburses_id: outflowId }),
-  unlinkReimbursement: (inflowId) =>
-    request("PUT", `/api/transactions/${inflowId}`, { reimburses_id: null }),
+  createReimbursementLink: (inflowId, outflowId, amount) =>
+    request("POST", "/api/reimbursement-links", { inflow_id: inflowId, outflow_id: outflowId, amount }),
+  deleteReimbursementLink: (linkId) => request("DELETE", `/api/reimbursement-links/${linkId}`),
+  getTransactionLinks: (id) => request("GET", `/api/transactions/${id}/links`),
+  getOwed: () => request("GET", "/api/transactions/owed"),
+  splitTransaction: (id, parts) => request("POST", `/api/transactions/${id}/split`, { parts }),
 
   getTransactions: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

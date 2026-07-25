@@ -2,20 +2,15 @@ import sqlite3
 from datetime import date
 
 
-# Portion of an outflow's amount that's covered elsewhere (expensed/reimbursed)
-# and should not count against the user's own spend/budget totals.
+# Portion of an outflow's amount the user expects to get back (whether via a
+# real payment they'll eventually link, or settled outside the app entirely,
+# e.g. payroll) and which should not count against their own spend/budget
+# totals. This is optimistic — it's excluded the moment it's set, before any
+# money actually arrives; see reimbursement_links / the /owed endpoint for
+# whether that expectation has actually been paid down yet.
 def _excluded_sql(prefix: str = "") -> str:
     p = f"{prefix}." if prefix else ""
-    return f"""
-        CASE
-            WHEN {p}reimbursement_status = 'expensed' THEN {p}amount
-            WHEN {p}reimbursement_status = 'partial' AND {p}reimbursement_mode = 'flat'
-                THEN MIN(COALESCE({p}reimbursement_value, 0), {p}amount)
-            WHEN {p}reimbursement_status = 'partial' AND {p}reimbursement_mode = 'percent'
-                THEN {p}amount * COALESCE({p}reimbursement_value, 0) / 100.0
-            ELSE 0
-        END
-    """
+    return f"MIN(COALESCE({p}expected_reimbursement, 0), {p}amount)"
 
 
 _EXCLUDED_SQL = _excluded_sql()
