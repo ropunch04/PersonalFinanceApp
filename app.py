@@ -17,6 +17,7 @@ from routes.categories import bp as categories_bp
 from routes.dashboard import bp as dashboard_bp
 from routes.import_route import bp as import_bp
 from routes.profile import bp as profile_bp
+from routes.reimbursements import bp as reimbursements_bp
 from routes.sync_routes import bp as sync_bp
 from routes.transactions import bp as transactions_bp
 from services.sync_service import scheduled_sync_all
@@ -44,6 +45,7 @@ app.register_blueprint(categories_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(import_bp)
 app.register_blueprint(profile_bp)
+app.register_blueprint(reimbursements_bp)
 app.register_blueprint(sync_bp)
 app.register_blueprint(transactions_bp)
 

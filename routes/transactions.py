@@ -13,16 +13,25 @@ bp = Blueprint("transactions", __name__, url_prefix="/api")
 _TXN_SELECT = f"""
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
            c.name AS category_name, t.notes, t.transaction_at, t.created_at,
-           t.reimburses_id, t.reimbursement_status, t.reimbursement_mode, t.reimbursement_value,
+           t.expected_reimbursement, t.reimbursement_external,
            {_excluded_sql("t")} AS reimbursement_excluded_amount,
-           rt.merchant_raw    AS reimburses_merchant,
-           rt.amount          AS reimburses_amount,
-           rt.transaction_at  AS reimburses_date,
-           (SELECT COUNT(*)                    FROM transactions ri WHERE ri.reimburses_id = t.id) AS reimbursed_by_count,
-           (SELECT COALESCE(SUM(ri.amount), 0) FROM transactions ri WHERE ri.reimburses_id = t.id) AS reimbursed_by_total
+           (SELECT COUNT(*)
+              FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS reimbursed_by_count,
+           (SELECT COALESCE(SUM(rl.amount), 0)
+              FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS reimbursed_by_total,
+           (SELECT COALESCE(SUM(rl.amount), 0)
+              FROM reimbursement_links rl WHERE rl.inflow_id = t.id)  AS applied_total,
+           CASE
+               WHEN t.direction = 'outflow' AND t.expected_reimbursement IS NOT NULL
+                    AND t.reimbursement_external = 0
+                   THEN MAX(0, t.expected_reimbursement - (
+                       SELECT COALESCE(SUM(rl.amount), 0)
+                       FROM reimbursement_links rl WHERE rl.outflow_id = t.id
+                   ))
+               ELSE NULL
+           END AS outstanding
     FROM transactions t
-    LEFT JOIN categories c  ON t.category_id = c.id
-    LEFT JOIN transactions rt ON rt.id = t.reimburses_id
+    LEFT JOIN categories c ON t.category_id = c.id
 """
 
 
@@ -184,7 +193,7 @@ def update_transaction(txn_id):
     db = get_user_db(g.current_user["user_id"])
 
     existing = db.execute(
-        "SELECT id, direction, reimbursement_status FROM transactions WHERE id = ?", (txn_id,)
+        "SELECT id, direction FROM transactions WHERE id = ?", (txn_id,)
     ).fetchone()
     if existing is None:
         return _err("Transaction not found", 404)
@@ -192,8 +201,7 @@ def update_transaction(txn_id):
     body = request.get_json(silent=True) or {}
     allowed = {
         "amount", "direction", "merchant_raw", "category_id", "notes",
-        "transaction_at", "reimburses_id",
-        "reimbursement_status", "reimbursement_mode", "reimbursement_value",
+        "transaction_at", "expected_reimbursement", "reimbursement_external",
     }
     updates = {k: v for k, v in body.items() if k in allowed}
 
@@ -203,71 +211,45 @@ def update_transaction(txn_id):
     if "direction" in updates and updates["direction"] not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
 
-    if "reimbursement_status" in updates:
-        status = updates["reimbursement_status"]
-        if status not in (None, "partial", "expensed"):
-            return _err("reimbursement_status must be 'partial', 'expensed', or null", 400)
-        final_direction = updates.get("direction", existing["direction"])
-        if status is not None and final_direction != "outflow":
-            return _err("reimbursement_status can only be set on outflow (debit) transactions", 400)
-        if status is not None:
-            # A transaction is reimbursed by linked inflows OR by a status —
-            # never both, or every metric would subtract the money twice.
-            linked = db.execute(
-                "SELECT COUNT(*) AS n FROM transactions WHERE reimburses_id = ?", (txn_id,)
-            ).fetchone()["n"]
-            if linked > 0:
-                return _err(
-                    "This transaction already has linked reimbursement payments — "
-                    "unlink those first, or keep using linked reimbursements for it",
-                    409,
-                )
-        if status == "partial":
-            mode = updates.get("reimbursement_mode")
-            value = updates.get("reimbursement_value")
-            if mode not in ("flat", "percent"):
-                return _err("reimbursement_mode must be 'flat' or 'percent' when status is 'partial'", 400)
+    final_direction = updates.get("direction", existing["direction"])
+
+    if "expected_reimbursement" in updates:
+        value = updates["expected_reimbursement"]
+        if value is not None:
             try:
                 value = float(value)
             except (TypeError, ValueError):
-                return _err("reimbursement_value must be a number when status is 'partial'", 400)
-            if value < 0 or (mode == "percent" and value > 100):
-                return _err("reimbursement_value out of range", 400)
-            updates["reimbursement_value"] = value
-        elif status == "expensed":
-            updates.setdefault("reimbursement_mode", None)
-            updates.setdefault("reimbursement_value", None)
-        elif status is None:
-            updates.setdefault("reimbursement_mode", None)
-            updates.setdefault("reimbursement_value", None)
+                return _err("expected_reimbursement must be a number or null", 400)
+            if value < 0:
+                return _err("expected_reimbursement cannot be negative", 400)
+            if final_direction != "outflow":
+                return _err("expected_reimbursement can only be set on outflow (debit) transactions", 400)
+            updates["expected_reimbursement"] = value
 
-    if "reimbursement_mode" in updates and updates["reimbursement_mode"] not in (None, "flat", "percent"):
-        return _err("reimbursement_mode must be 'flat', 'percent', or null", 400)
+    if "reimbursement_external" in updates:
+        external = bool(updates["reimbursement_external"])
+        if external:
+            if final_direction != "outflow":
+                return _err("reimbursement_external can only be set on outflow (debit) transactions", 400)
+            # "External" means this charge settles outside the app (e.g. payroll) —
+            # it shouldn't also have real linked payments, or the two ways of
+            # tracking it would disagree about whether it's been paid.
+            linked = db.execute(
+                "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ?", (txn_id,)
+            ).fetchone()["n"]
+            if linked > 0:
+                return _err(
+                    "This charge already has linked payments applied to it — unlink those "
+                    "first, or leave it trackable instead of marking it settled outside the app",
+                    409,
+                )
+        updates["reimbursement_external"] = int(external)
 
     if "amount" in updates:
         try:
             updates["amount"] = float(updates["amount"])
         except (TypeError, ValueError):
             return _err("amount must be a number", 400)
-
-    if "reimburses_id" in updates:
-        rid = updates["reimburses_id"]
-        if rid is not None:
-            if rid == txn_id:
-                return _err("A transaction cannot reimburse itself", 400)
-            target = db.execute(
-                "SELECT id, direction, reimbursement_status FROM transactions WHERE id = ?", (rid,)
-            ).fetchone()
-            if target is None:
-                return _err("Linked transaction not found", 404)
-            if target["direction"] != "outflow":
-                return _err("reimburses_id must point to an outflow transaction", 400)
-            if target["reimbursement_status"] is not None:
-                return _err(
-                    "That transaction is already marked expensed/partially reimbursed — "
-                    "clear its reimbursement status before linking payments to it",
-                    409,
-                )
 
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     values = list(updates.values()) + [txn_id]
@@ -291,6 +273,113 @@ def delete_transaction(txn_id):
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     db.commit()
     return _ok({"deleted": True})
+
+
+@bp.post("/transactions/<int:txn_id>/split")
+@require_auth
+def split_transaction(txn_id):
+    db = get_user_db(g.current_user["user_id"])
+
+    existing = db.execute(
+        "SELECT id, amount, merchant_raw, direction, notes, transaction_at, created_at, "
+        "source_hash, expected_reimbursement FROM transactions WHERE id = ?",
+        (txn_id,),
+    ).fetchone()
+    if existing is None:
+        return _err("Transaction not found", 404)
+
+    body = request.get_json(silent=True) or {}
+    parts = body.get("parts")
+    if not isinstance(parts, list) or len(parts) < 2:
+        return _err("parts must be a list of at least 2 pieces", 400)
+
+    cleaned = []
+    total = 0.0
+    for part in parts:
+        if not isinstance(part, dict):
+            return _err("Each part must be an object", 400)
+        try:
+            amount = float(part.get("amount"))
+        except (TypeError, ValueError):
+            return _err("Each part needs a numeric amount", 400)
+        if amount <= 0:
+            return _err("Each part's amount must be greater than 0", 400)
+        total += amount
+        merchant_raw = (part.get("merchant_raw") or "").strip() or existing["merchant_raw"]
+        cleaned.append({
+            "amount": amount,
+            "category_id": part.get("category_id"),
+            "merchant_raw": merchant_raw,
+            "notes": part.get("notes") if part.get("notes") not in (None, "") else existing["notes"],
+        })
+
+    if abs(total - existing["amount"]) > 0.01:
+        return _err(
+            f"Parts must add up to the original amount (${existing['amount']:.2f}), got ${total:.2f}",
+            400,
+        )
+
+    if existing["expected_reimbursement"] is not None:
+        return _err("Clear this transaction's reimbursement expectation before splitting it", 409)
+
+    linked = db.execute(
+        "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ? OR inflow_id = ?",
+        (txn_id, txn_id),
+    ).fetchone()["n"]
+    if linked > 0:
+        return _err(
+            "This transaction has linked reimbursement payments — unlink those before splitting it",
+            409,
+        )
+
+    # Delete the original first (within this same uncommitted transaction) so
+    # inserting a new row that reuses its source_hash below doesn't collide
+    # with the UNIQUE constraint.
+    db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
+
+    created_ids = []
+    for i, part in enumerate(cleaned):
+        if existing["source_hash"] is None:
+            source_hash = None
+        elif i == 0:
+            # Preserve the original hash on the first part so a future
+            # re-import or re-sync of the same source row is still recognized
+            # as a duplicate, instead of resurrecting the un-split transaction.
+            source_hash = existing["source_hash"]
+        else:
+            source_hash = f"{existing['source_hash']}:split{i}"
+
+        category_id = part["category_id"]
+        if category_id is None and part["merchant_raw"]:
+            category_id = resolve_category_id(db, part["merchant_raw"])
+
+        cur = db.execute(
+            """
+            INSERT INTO transactions
+                (amount, merchant_raw, direction, category_id, notes,
+                 transaction_at, created_at, source_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                part["amount"],
+                part["merchant_raw"],
+                existing["direction"],
+                category_id,
+                part["notes"],
+                existing["transaction_at"],
+                existing["created_at"],
+                source_hash,
+            ),
+        )
+        created_ids.append(cur.lastrowid)
+
+    db.commit()
+
+    placeholders = ",".join("?" * len(created_ids))
+    rows = db.execute(
+        _TXN_SELECT + f"WHERE t.id IN ({placeholders}) ORDER BY t.id", created_ids
+    ).fetchall()
+    return _ok([_row_to_dict(r) for r in rows]), 201
 
 
 @bp.get("/transactions/merchants/unclassified")
@@ -411,7 +500,7 @@ def linkable_outflows():
     q = request.args.get("q", "").strip()
     limit = min(request.args.get("limit", default=20, type=int), 100)
 
-    where = "WHERE t.direction = 'outflow'"
+    where = "WHERE t.direction = 'outflow' AND t.reimbursement_external = 0"
     params = []
     if q:
         where += " AND t.merchant_raw LIKE ?"
@@ -419,7 +508,9 @@ def linkable_outflows():
 
     rows = db.execute(f"""
         SELECT t.id, t.amount, t.merchant_raw, t.transaction_at,
-               c.name AS category_name
+               c.name AS category_name, t.expected_reimbursement,
+               (SELECT COALESCE(SUM(rl.amount), 0)
+                  FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS received_total
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
         {where}

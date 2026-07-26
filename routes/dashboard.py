@@ -175,11 +175,10 @@ def dashboard_merchants():
             AVG(t.amount) AS average_amount
         FROM transactions t
         LEFT JOIN (
-            SELECT reimburses_id, SUM(amount) AS total_reimb
-            FROM transactions
-            WHERE direction = 'inflow' AND reimburses_id IS NOT NULL
-            GROUP BY reimburses_id
-        ) reimb ON reimb.reimburses_id = t.id
+            SELECT outflow_id, SUM(amount) AS total_reimb
+            FROM reimbursement_links
+            GROUP BY outflow_id
+        ) reimb ON reimb.outflow_id = t.id
         WHERE t.direction = 'outflow'
           AND {w}
           AND t.merchant_raw IS NOT NULL
@@ -212,11 +211,10 @@ def dashboard_merchants():
                t.transaction_at
         FROM transactions t
         LEFT JOIN (
-            SELECT reimburses_id, SUM(amount) AS total_reimb
-            FROM transactions
-            WHERE direction = 'inflow' AND reimburses_id IS NOT NULL
-            GROUP BY reimburses_id
-        ) reimb ON reimb.reimburses_id = t.id
+            SELECT outflow_id, SUM(amount) AS total_reimb
+            FROM reimbursement_links
+            GROUP BY outflow_id
+        ) reimb ON reimb.outflow_id = t.id
         WHERE t.direction = 'outflow'
           AND {w}
           AND t.merchant_raw IS NOT NULL
