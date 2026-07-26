@@ -108,6 +108,41 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except Exception:
         pass  # column already exists
 
+<<<<<<< Updated upstream
+=======
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN expected_reimbursement REAL")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_external INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        conn.execute("UPDATE transactions SET transaction_at = transaction_at || 'T00:00:00' WHERE LENGTH(transaction_at) = 10")
+        conn.commit()
+    except Exception:
+        pass
+
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reimbursement_links (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            inflow_id    INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+            outflow_id   INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+            amount       REAL    NOT NULL CHECK(amount > 0),
+            created_at   TEXT    NOT NULL
+        )
+    """)
+    conn.commit()
+
+    _migrate_reimbursements(conn)
+
+>>>>>>> Stashed changes
     rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()
     distinct_orders = conn.execute("SELECT COUNT(DISTINCT sort_order) AS n FROM categories").fetchone()["n"]
     if len(rows) > 1 and distinct_orders <= 1:

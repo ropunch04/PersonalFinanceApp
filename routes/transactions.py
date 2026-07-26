@@ -94,14 +94,14 @@ def list_transactions():
         extra_params = []
 
     _SORT_MAP = {
-        "date_desc":    "t.transaction_at DESC",
-        "date_asc":     "t.transaction_at ASC",
-        "amount_desc":  "t.amount DESC",
-        "amount_asc":   "t.amount ASC",
-        "merchant_asc": "t.merchant_raw ASC NULLS LAST",
+        "date_desc":    "t.transaction_at DESC, t.created_at DESC, t.id DESC",
+        "date_asc":     "t.transaction_at ASC, t.created_at ASC, t.id ASC",
+        "amount_desc":  "t.amount DESC, t.transaction_at DESC, t.created_at DESC, t.id DESC",
+        "amount_asc":   "t.amount ASC, t.transaction_at DESC, t.created_at DESC, t.id DESC",
+        "merchant_asc": "t.merchant_raw ASC NULLS LAST, t.transaction_at DESC, t.created_at DESC, t.id DESC",
     }
     sort_key = request.args.get("sort", "date_desc")
-    order_by = _SORT_MAP.get(sort_key, "t.transaction_at DESC")
+    order_by = _SORT_MAP.get(sort_key, "t.transaction_at DESC, t.created_at DESC, t.id DESC")
 
     total = db.execute(
         f"SELECT COUNT(*) FROM transactions t {where_sql}", params + extra_params
@@ -131,6 +131,9 @@ def create_transaction():
 
     if amount is None or direction is None or transaction_at is None:
         return _err("amount, direction, and transaction_at are required", 400)
+
+    if isinstance(transaction_at, str) and len(transaction_at) == 10:
+        transaction_at = f"{transaction_at}T00:00:00"
 
     try:
         amount = float(amount)
@@ -199,6 +202,9 @@ def update_transaction(txn_id):
 
     if not updates:
         return _err("No updatable fields provided", 400)
+
+    if "transaction_at" in updates and isinstance(updates["transaction_at"], str) and len(updates["transaction_at"]) == 10:
+        updates["transaction_at"] = f"{updates['transaction_at']}T00:00:00"
 
     if "direction" in updates and updates["direction"] not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
@@ -423,7 +429,7 @@ def linkable_outflows():
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
         {where}
-        ORDER BY t.transaction_at DESC
+        ORDER BY t.transaction_at DESC, t.created_at DESC, t.id DESC
         LIMIT ?
     """, params + [limit]).fetchall()
 
