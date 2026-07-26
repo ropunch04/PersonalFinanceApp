@@ -9,6 +9,7 @@ import CategoryDonut from "../components/CategoryDonut";
 import BudgetByCategoryWidget from "../components/BudgetByCategoryWidget";
 import SpendingTrendChart from "../components/SpendingTrendChart";
 import MerchantInsights from "../components/MerchantInsights";
+import OwedWidget from "../components/OwedWidget";
 import ComparisonCard from "../components/ComparisonCard";
 import PinPickerModal from "../components/PinPickerModal";
 
@@ -356,6 +357,8 @@ export default function Dashboard({ onQueueChange }) {
               );
             case "merchants":
               return <MerchantInsights key={key} dateParams={allParams} />;
+            case "owed":
+              return <OwedWidget key={key} />;
             default:
               return null;
           }

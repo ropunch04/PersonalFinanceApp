@@ -8,6 +8,7 @@ export const WIDGETS = [
   { key: "donut", label: "Category Chart" },
   { key: "budget", label: "Budget by Category" },
   { key: "merchants", label: "Merchant Insights" },
+  { key: "owed", label: "Owed to You" },
 ];
 
 const DEFAULT_ORDER = WIDGETS.map((w) => w.key);
