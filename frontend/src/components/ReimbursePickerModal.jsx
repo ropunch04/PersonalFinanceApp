@@ -108,11 +108,30 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
         </div>
 
         {existingLinks.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{
+            marginBottom: 12,
+            background: "var(--surface-raised)",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            padding: "8px 12px",
+            maxHeight: "140px",
+            overflowY: "auto",
+            flexShrink: 0,
+          }}>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginBottom: 4,
+            }}>
+              Applied Charges ({existingLinks.length})
+            </div>
             {existingLinks.map((l) => (
               <div key={l.link_id} style={{
                 display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 0", borderBottom: "1px solid var(--border)",
+                padding: "6px 0", borderBottom: "1px solid var(--border)",
               }}>
                 <div style={{
                   flex: 1, minWidth: 0, fontSize: 13, color: "var(--text)",
@@ -127,7 +146,7 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
                   className="btn btn-ghost btn-sm"
                   disabled={unlinking === l.link_id}
                   onClick={() => handleUnlink(l.link_id)}
-                  style={{ flexShrink: 0, padding: "0 8px" }}
+                  style={{ flexShrink: 0, padding: "0 8px", height: 28, minHeight: 28, fontSize: 12 }}
                 >
                   {unlinking === l.link_id ? "…" : "Unlink"}
                 </button>
@@ -145,11 +164,12 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
             marginBottom: 12, padding: "9px 12px", borderRadius: 8,
             border: "1px solid var(--border)", background: "var(--surface-raised)",
             color: "var(--text)", fontSize: 14, width: "100%", boxSizing: "border-box",
+            flexShrink: 0,
           }}
           autoFocus
         />
 
-        <div style={{ overflowY: "auto", flex: 1 }}>
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 140 }}>
           {loading && <div className="top-bar-loading" />}
           {!loading && outflows.length === 0 && (
             <div className="empty-state" style={{ padding: "32px 0" }}>No charges found</div>
