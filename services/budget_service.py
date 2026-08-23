@@ -10,7 +10,14 @@ from datetime import date
 # whether that expectation has actually been paid down yet.
 def _excluded_sql(prefix: str = "") -> str:
     p = f"{prefix}." if prefix else ""
-    return f"MIN(COALESCE({p}expected_reimbursement, 0), {p}amount)"
+    tbl = prefix if prefix else "transactions"
+    received = (
+        f"COALESCE((SELECT SUM(rl.amount) FROM reimbursement_links rl "
+        f"WHERE rl.outflow_id = {tbl}.id), 0)"
+    )
+    return (
+        f"MIN(MAX(COALESCE({p}expected_reimbursement, 0), {received}), {p}amount)"
+    )
 
 
 _EXCLUDED_SQL = _excluded_sql()
