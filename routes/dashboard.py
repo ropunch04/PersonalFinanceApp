@@ -5,7 +5,7 @@ from flask import Blueprint, g, request
 
 from auth.middleware import require_auth
 from db_context import get_user_db
-from services.budget_service import _excluded_sql, get_budget_summary
+from services.budget_service import _excluded_sql, _inflow_income_sql, get_budget_summary
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api")
 
@@ -33,7 +33,7 @@ def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
     row = conn.execute(f"""
         SELECT
             COALESCE(SUM(CASE WHEN direction='outflow' THEN amount - {_excluded_sql()} ELSE 0 END),0) AS spent,
-            COALESCE(SUM(CASE WHEN direction='inflow'  THEN amount ELSE 0 END),0) AS income
+            COALESCE(SUM(CASE WHEN direction='inflow'  THEN {_inflow_income_sql()} ELSE 0 END),0) AS income
         FROM transactions WHERE {w_where}
     """, p).fetchone()
     spent  = row["spent"]
@@ -110,7 +110,7 @@ def dashboard_trend():
         SELECT
             {group_expr} AS bucket,
             SUM(CASE WHEN direction = 'outflow' THEN amount - {_excluded_sql()} ELSE 0 END) AS spent,
-            SUM(CASE WHEN direction = 'inflow'  THEN amount ELSE 0 END) AS income
+            SUM(CASE WHEN direction = 'inflow'  THEN {_inflow_income_sql()} ELSE 0 END) AS income
         FROM transactions
         WHERE {w}
         GROUP BY bucket
@@ -170,15 +170,10 @@ def dashboard_merchants():
     top_merchants = conn.execute(f"""
         SELECT
             t.merchant_raw,
-            SUM(t.amount - {_excluded_sql("t")}) - COALESCE(SUM(reimb.total_reimb), 0) AS net_spent,
+            SUM(t.amount - {_excluded_sql("t")}) AS net_spent,
             COUNT(t.id)   AS transaction_count,
             AVG(t.amount) AS average_amount
         FROM transactions t
-        LEFT JOIN (
-            SELECT outflow_id, SUM(amount) AS total_reimb
-            FROM reimbursement_links
-            GROUP BY outflow_id
-        ) reimb ON reimb.outflow_id = t.id
         WHERE t.direction = 'outflow'
           AND {w}
           AND t.merchant_raw IS NOT NULL
@@ -207,14 +202,9 @@ def dashboard_merchants():
 
     largest = conn.execute(f"""
         SELECT t.merchant_raw,
-               t.amount - {_excluded_sql("t")} - COALESCE(reimb.total_reimb, 0) AS net_amount,
+               t.amount - {_excluded_sql("t")} AS net_amount,
                t.transaction_at
         FROM transactions t
-        LEFT JOIN (
-            SELECT outflow_id, SUM(amount) AS total_reimb
-            FROM reimbursement_links
-            GROUP BY outflow_id
-        ) reimb ON reimb.outflow_id = t.id
         WHERE t.direction = 'outflow'
           AND {w}
           AND t.merchant_raw IS NOT NULL

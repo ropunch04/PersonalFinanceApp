@@ -16,6 +16,17 @@ def _excluded_sql(prefix: str = "") -> str:
 _EXCLUDED_SQL = _excluded_sql()
 
 
+# Portion of an inflow that represents real income (unapplied to any reimbursement).
+# Inflows that are applied to reimburse outflows via reimbursement_links are expense
+# offsets and must not be counted as income.
+def _inflow_income_sql(prefix: str = "") -> str:
+    table = prefix if prefix else "transactions"
+    return f"MAX(0, {table}.amount - COALESCE((SELECT SUM(rl.amount) FROM reimbursement_links rl WHERE rl.inflow_id = {table}.id), 0))"
+
+
+_INFLOW_INCOME_SQL = _inflow_income_sql()
+
+
 def get_budget_summary(
     conn: sqlite3.Connection,
     start_date: str = None,
@@ -42,7 +53,7 @@ def get_budget_summary(
     totals = conn.execute(f"""
         SELECT
             COALESCE(SUM(CASE WHEN direction = 'outflow' THEN amount - {_EXCLUDED_SQL} ELSE 0 END), 0) AS total_spent,
-            COALESCE(SUM(CASE WHEN direction = 'inflow'  THEN amount ELSE 0 END), 0) AS total_income
+            COALESCE(SUM(CASE WHEN direction = 'inflow'  THEN {_INFLOW_INCOME_SQL} ELSE 0 END), 0) AS total_income
         FROM transactions
         WHERE {w_where}
     """, p).fetchone()
@@ -73,7 +84,7 @@ def get_budget_summary(
             COALESCE(b.period, 'monthly') AS period,
             COALESCE(SUM(
                 CASE WHEN t.direction = 'outflow' THEN  t.amount - {_excluded_sql("t")}
-                     WHEN t.direction = 'inflow'  THEN -t.amount
+                     WHEN t.direction = 'inflow'  THEN -{_inflow_income_sql("t")}
                      ELSE 0 END
             ), 0) AS spent,
             COALESCE(b.amount, 0) AS budget

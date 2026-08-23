@@ -196,7 +196,8 @@ def update_transaction(txn_id):
     db = get_user_db(g.current_user["user_id"])
 
     existing = db.execute(
-        "SELECT id, direction FROM transactions WHERE id = ?", (txn_id,)
+        "SELECT id, amount, direction, expected_reimbursement, reimbursement_external FROM transactions WHERE id = ?",
+        (txn_id,),
     ).fetchone()
     if existing is None:
         return _err("Transaction not found", 404)
@@ -218,6 +219,46 @@ def update_transaction(txn_id):
         return _err("direction must be 'inflow' or 'outflow'", 400)
 
     final_direction = updates.get("direction", existing["direction"])
+    if final_direction != existing["direction"]:
+        linked = db.execute(
+            "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ? OR inflow_id = ?",
+            (txn_id, txn_id),
+        ).fetchone()["n"]
+        if linked > 0:
+            return _err(
+                "This transaction has linked reimbursement payments — unlink those before changing its direction",
+                409,
+            )
+        if final_direction == "inflow":
+            if "expected_reimbursement" not in updates:
+                updates["expected_reimbursement"] = None
+            if "reimbursement_external" not in updates:
+                updates["reimbursement_external"] = 0
+
+    if "amount" in updates:
+        try:
+            updates["amount"] = float(updates["amount"])
+        except (TypeError, ValueError):
+            return _err("amount must be a number", 400)
+        if updates["amount"] < 0:
+            return _err("amount cannot be negative", 400)
+
+        if final_direction == "inflow":
+            applied = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS n FROM reimbursement_links WHERE inflow_id = ?",
+                (txn_id,),
+            ).fetchone()["n"]
+            if updates["amount"] < applied - 1e-6:
+                return _err(f"Amount cannot be less than ${applied:.2f} already applied to reimbursements", 400)
+        else:
+            received = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS n FROM reimbursement_links WHERE outflow_id = ?",
+                (txn_id,),
+            ).fetchone()["n"]
+            if updates["amount"] < received - 1e-6:
+                return _err(f"Amount cannot be less than ${received:.2f} already received from reimbursements", 400)
+
+    final_amount = updates.get("amount", existing["amount"])
 
     if "expected_reimbursement" in updates:
         value = updates["expected_reimbursement"]
@@ -228,6 +269,8 @@ def update_transaction(txn_id):
                 return _err("expected_reimbursement must be a number or null", 400)
             if value < 0:
                 return _err("expected_reimbursement cannot be negative", 400)
+            if value > final_amount + 1e-6:
+                return _err("expected_reimbursement cannot exceed transaction amount", 400)
             if final_direction != "outflow":
                 return _err("expected_reimbursement can only be set on outflow (debit) transactions", 400)
             updates["expected_reimbursement"] = value
@@ -250,12 +293,6 @@ def update_transaction(txn_id):
                     409,
                 )
         updates["reimbursement_external"] = int(external)
-
-    if "amount" in updates:
-        try:
-            updates["amount"] = float(updates["amount"])
-        except (TypeError, ValueError):
-            return _err("amount must be a number", 400)
 
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     values = list(updates.values()) + [txn_id]
