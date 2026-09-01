@@ -1,4 +1,4 @@
-# DO NOT MERGE TO MAIN!!
+# DO NOT MERGE TO MAIN (without letting me know)!!
 
 # Personal Finance App
 
