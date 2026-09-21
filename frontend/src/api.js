@@ -77,7 +77,7 @@ export const api = {
     request("POST", "/api/reimbursement-links", { inflow_id: inflowId, outflow_id: outflowId, amount }),
   deleteReimbursementLink: (linkId) => request("DELETE", `/api/reimbursement-links/${linkId}`),
   getTransactionLinks: (id) => request("GET", `/api/transactions/${id}/links`),
-  getOwed: () => request("GET", "/api/transactions/owed"),
+  getAwaitingReimbursement: () => request("GET", "/api/transactions/awaiting-reimbursement"),
   splitTransaction: (id, parts) => request("POST", `/api/transactions/${id}/split`, { parts }),
 
   getTransactions: (params = {}) => {

@@ -49,9 +49,7 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
   }
 
   function suggestedAmount(o) {
-    const stillOwed = o.expected_reimbursement != null
-      ? Math.max(o.expected_reimbursement - (o.received_total || 0), 0)
-      : Math.max(o.amount - (o.received_total || 0), 0);
+    const stillOwed = Math.max(o.amount - (o.received_total || 0), 0);
     return Math.max(0, Math.min(stillOwed, remaining)).toFixed(2);
   }
 
@@ -175,9 +173,7 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
             <div className="empty-state" style={{ padding: "32px 0" }}>No charges found</div>
           )}
           {outflows.map((o) => {
-            const stillOwed = o.expected_reimbursement != null
-              ? Math.max(o.expected_reimbursement - (o.received_total || 0), 0)
-              : null;
+            const stillOwed = Math.max(o.amount - (o.received_total || 0), 0);
             return (
               <div key={o.id} style={{
                 display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
@@ -189,10 +185,11 @@ export default function ReimbursePickerModal({ inflowTxn, onClose, onLinked }) {
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {o.merchant_raw || "Untitled"}
+                    {o.awaiting_reimbursement && " · awaiting reimbursement"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
                     {fmtDate(o.transaction_at)}{o.category_name ? ` · ${o.category_name}` : ""}
-                    {stillOwed != null && ` · owed ${fmtCurrency(stillOwed, 2)}`}
+                    {stillOwed > 0.005 && ` · unlinked ${fmtCurrency(stillOwed, 2)}`}
                   </div>
                 </div>
                 <span style={{ fontSize: 13, color: "var(--text-muted)", flexShrink: 0 }}>

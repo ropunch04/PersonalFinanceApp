@@ -5,7 +5,7 @@ from flask import Blueprint, g, request
 from auth.middleware import require_auth
 from db_context import get_user_db
 from routes.helpers import _err, _ok
-from services.budget_service import _excluded_sql
+from services.budget_service import _received_sql
 from services.categorize import merchant_prefix, resolve_category_id
 
 bp = Blueprint("transactions", __name__, url_prefix="/api")
@@ -13,23 +13,13 @@ bp = Blueprint("transactions", __name__, url_prefix="/api")
 _TXN_SELECT = f"""
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
            c.name AS category_name, t.notes, t.transaction_at, t.created_at,
-           t.expected_reimbursement, t.reimbursement_external,
-           {_excluded_sql("t")} AS reimbursement_excluded_amount,
+           t.awaiting_reimbursement,
            (SELECT COUNT(*)
               FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS reimbursed_by_count,
            (SELECT COALESCE(SUM(rl.amount), 0)
               FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS reimbursed_by_total,
            (SELECT COALESCE(SUM(rl.amount), 0)
-              FROM reimbursement_links rl WHERE rl.inflow_id = t.id)  AS applied_total,
-           CASE
-               WHEN t.direction = 'outflow' AND t.expected_reimbursement IS NOT NULL
-                    AND t.reimbursement_external = 0
-                   THEN MAX(0, t.expected_reimbursement - (
-                       SELECT COALESCE(SUM(rl.amount), 0)
-                       FROM reimbursement_links rl WHERE rl.outflow_id = t.id
-                   ))
-               ELSE NULL
-           END AS outstanding
+              FROM reimbursement_links rl WHERE rl.inflow_id = t.id)  AS applied_total
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
 """
@@ -37,13 +27,6 @@ _TXN_SELECT = f"""
 
 def _row_to_dict(row) -> dict:
     return dict(row)
-
-
-def _detach_references(db, txn_id: int) -> None:
-    """Clear the legacy reimburses_id pointer on any row that references
-    txn_id, so deleting/splitting txn_id doesn't hit an IntegrityError under
-    PRAGMA foreign_keys=ON. Must run in the same transaction as the delete."""
-    db.execute("UPDATE transactions SET reimburses_id = NULL WHERE reimburses_id = ?", (txn_id,))
 
 
 def _linked_reimbursement_count(db, txn_id: int) -> int:
@@ -227,7 +210,7 @@ def update_transaction(txn_id):
     db = get_user_db(g.current_user["user_id"])
 
     existing = db.execute(
-        "SELECT id, amount, direction, expected_reimbursement, reimbursement_external FROM transactions WHERE id = ?",
+        "SELECT id, amount, direction, awaiting_reimbursement FROM transactions WHERE id = ?",
         (txn_id,),
     ).fetchone()
     if existing is None:
@@ -236,7 +219,7 @@ def update_transaction(txn_id):
     body = request.get_json(silent=True) or {}
     allowed = {
         "amount", "direction", "merchant_raw", "category_id", "notes",
-        "transaction_at", "expected_reimbursement", "reimbursement_external",
+        "transaction_at", "awaiting_reimbursement",
     }
     updates = {k: v for k, v in body.items() if k in allowed}
 
@@ -260,11 +243,8 @@ def update_transaction(txn_id):
                 "This transaction has linked reimbursement payments — unlink those before changing its direction",
                 409,
             )
-        if final_direction == "inflow":
-            if "expected_reimbursement" not in updates:
-                updates["expected_reimbursement"] = None
-            if "reimbursement_external" not in updates:
-                updates["reimbursement_external"] = 0
+        if final_direction == "inflow" and "awaiting_reimbursement" not in updates:
+            updates["awaiting_reimbursement"] = 0
 
     if "amount" in updates:
         try:
@@ -289,41 +269,11 @@ def update_transaction(txn_id):
             if updates["amount"] < received - 1e-6:
                 return _err(f"Amount cannot be less than ${received:.2f} already received from reimbursements", 400)
 
-    final_amount = updates.get("amount", existing["amount"])
-
-    if "expected_reimbursement" in updates:
-        value = updates["expected_reimbursement"]
-        if value is not None:
-            try:
-                value = float(value)
-            except (TypeError, ValueError):
-                return _err("expected_reimbursement must be a number or null", 400)
-            if value < 0:
-                return _err("expected_reimbursement cannot be negative", 400)
-            if value > final_amount + 1e-6:
-                return _err("expected_reimbursement cannot exceed transaction amount", 400)
-            if final_direction != "outflow":
-                return _err("expected_reimbursement can only be set on outflow (debit) transactions", 400)
-            updates["expected_reimbursement"] = value
-
-    if "reimbursement_external" in updates:
-        external = bool(updates["reimbursement_external"])
-        if external:
-            if final_direction != "outflow":
-                return _err("reimbursement_external can only be set on outflow (debit) transactions", 400)
-            # "External" means this charge settles outside the app (e.g. payroll) —
-            # it shouldn't also have real linked payments, or the two ways of
-            # tracking it would disagree about whether it's been paid.
-            linked = db.execute(
-                "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ?", (txn_id,)
-            ).fetchone()["n"]
-            if linked > 0:
-                return _err(
-                    "This charge already has linked payments applied to it — unlink those "
-                    "first, or leave it trackable instead of marking it settled outside the app",
-                    409,
-                )
-        updates["reimbursement_external"] = int(external)
+    if "awaiting_reimbursement" in updates:
+        awaiting = bool(updates["awaiting_reimbursement"])
+        if awaiting and final_direction != "outflow":
+            return _err("awaiting_reimbursement can only be set on outflow (debit) transactions", 400)
+        updates["awaiting_reimbursement"] = int(awaiting)
 
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     values = list(updates.values()) + [txn_id]
@@ -355,7 +305,6 @@ def delete_transaction(txn_id):
             409,
         )
 
-    _detach_references(db, txn_id)
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     db.commit()
     return _ok({"deleted": True})
@@ -368,7 +317,7 @@ def split_transaction(txn_id):
 
     existing = db.execute(
         "SELECT id, amount, merchant_raw, direction, notes, transaction_at, created_at, "
-        "source_hash, expected_reimbursement FROM transactions WHERE id = ?",
+        "source_hash, awaiting_reimbursement FROM transactions WHERE id = ?",
         (txn_id,),
     ).fetchone()
     if existing is None:
@@ -405,8 +354,8 @@ def split_transaction(txn_id):
             400,
         )
 
-    if existing["expected_reimbursement"] is not None:
-        return _err("Clear this transaction's reimbursement expectation before splitting it", 409)
+    if existing["awaiting_reimbursement"]:
+        return _err("Clear this transaction's \"awaiting reimbursement\" flag before splitting it", 409)
 
     linked = _linked_reimbursement_count(db, txn_id)
     if linked > 0:
@@ -417,10 +366,7 @@ def split_transaction(txn_id):
 
     # Delete the original first (within this same uncommitted transaction) so
     # inserting a new row that reuses its source_hash below doesn't collide
-    # with the UNIQUE constraint. Detach first — otherwise, with
-    # PRAGMA foreign_keys=ON, deleting a row another transaction's
-    # reimburses_id still points at raises an IntegrityError (500).
-    _detach_references(db, txn_id)
+    # with the UNIQUE constraint.
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
 
     created_ids = []
@@ -591,7 +537,7 @@ def linkable_outflows():
     q = request.args.get("q", "").strip()
     limit = min(request.args.get("limit", default=20, type=int), 100)
 
-    where = "WHERE t.direction = 'outflow' AND t.reimbursement_external = 0"
+    where = "WHERE t.direction = 'outflow'"
     params = []
     if q:
         where += " AND t.merchant_raw LIKE ? ESCAPE '\\'"
@@ -599,9 +545,8 @@ def linkable_outflows():
 
     rows = db.execute(f"""
         SELECT t.id, t.amount, t.merchant_raw, t.transaction_at,
-               c.name AS category_name, t.expected_reimbursement,
-               (SELECT COALESCE(SUM(rl.amount), 0)
-                  FROM reimbursement_links rl WHERE rl.outflow_id = t.id) AS received_total
+               c.name AS category_name, t.awaiting_reimbursement,
+               {_received_sql("t")} AS received_total
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
         {where}

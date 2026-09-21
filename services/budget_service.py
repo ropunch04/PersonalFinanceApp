@@ -2,25 +2,37 @@ import sqlite3
 from datetime import date
 
 
-# Portion of an outflow's amount the user expects to get back (whether via a
-# real payment they'll eventually link, or settled outside the app entirely,
-# e.g. payroll) and which should not count against their own spend/budget
-# totals. This is optimistic — it's excluded the moment it's set, before any
-# money actually arrives; see reimbursement_links / the /owed endpoint for
-# whether that expectation has actually been paid down yet.
-def _excluded_sql(prefix: str = "") -> str:
-    p = f"{prefix}." if prefix else ""
+# Sum of reimbursement_links applied against an outflow (money actually
+# received against it so far, regardless of what's expected).
+def _received_sql(prefix: str = "") -> str:
     tbl = prefix if prefix else "transactions"
-    received = (
+    return (
         f"COALESCE((SELECT SUM(rl.amount) FROM reimbursement_links rl "
         f"WHERE rl.outflow_id = {tbl}.id), 0)"
     )
-    return (
-        f"MIN(MAX(COALESCE({p}expected_reimbursement, 0), {received}), {p}amount)"
-    )
+
+
+# Portion of an outflow's amount that's actually been paid back via
+# reimbursement_links, capped at the transaction's own amount. This is the
+# only thing that excludes an outflow from spend/budget totals — nothing is
+# excluded until money is actually linked. (awaiting_reimbursement is a
+# separate, non-financial flag — see _reimbursement_gap_sql — that doesn't
+# by itself hide anything from spend.)
+def _excluded_sql(prefix: str = "") -> str:
+    p = f"{prefix}." if prefix else ""
+    return f"MIN({_received_sql(prefix)}, {p}amount)"
 
 
 _EXCLUDED_SQL = _excluded_sql()
+
+
+# Remaining gap between an outflow's amount and what's been linked back to it
+# so far. Informational only, for the "Awaiting Reimbursement" list — there's
+# no amount you "must" reach; clearing awaiting_reimbursement is always a
+# manual "mark complete", never automatic.
+def _reimbursement_gap_sql(prefix: str = "") -> str:
+    p = f"{prefix}." if prefix else ""
+    return f"MAX(0, {p}amount - {_received_sql(prefix)})"
 
 
 # Portion of an inflow that represents real income (unapplied to any reimbursement).

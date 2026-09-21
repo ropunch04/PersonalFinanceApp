@@ -1,12 +1,11 @@
-"""Reimbursement bucket links and the outstanding-payments tracker.
+"""Reimbursement bucket links and the awaiting-reimbursement tracker.
 
 A payment (inflow) can be applied, in whole or in part, against one or more
 charges (outflows) via reimbursement_links — see db_context.py's schema
 comment. This blueprint owns creating/removing those links, inspecting a
-transaction's link graph, and listing charges where the user still expects
-money back that hasn't actually arrived yet (see expected_reimbursement on
-routes/transactions.py's _TXN_SELECT for the "optimistic" exclusion this
-complements).
+transaction's link graph, and listing charges the user has flagged as
+awaiting reimbursement (see transactions.awaiting_reimbursement) that aren't
+yet fully covered by links.
 """
 
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from flask import Blueprint, g, request
 from auth.middleware import require_auth
 from db_context import get_user_db
 from routes.helpers import _err, _ok
+from services.budget_service import _reimbursement_gap_sql, _received_sql
 
 bp = Blueprint("reimbursements", __name__, url_prefix="/api")
 
@@ -44,7 +44,7 @@ def create_link():
         "SELECT id, amount, direction FROM transactions WHERE id = ?", (inflow_id,)
     ).fetchone()
     outflow = db.execute(
-        "SELECT id, amount, direction, reimbursement_external FROM transactions WHERE id = ?",
+        "SELECT id, amount, direction FROM transactions WHERE id = ?",
         (outflow_id,),
     ).fetchone()
     if inflow is None or outflow is None:
@@ -53,11 +53,6 @@ def create_link():
         return _err("inflow_id must reference an inflow transaction", 400)
     if outflow["direction"] != "outflow":
         return _err("outflow_id must reference an outflow transaction", 400)
-    if outflow["reimbursement_external"]:
-        return _err(
-            "That charge is marked as settled outside the app — clear that before linking a payment to it",
-            409,
-        )
     if amount > outflow["amount"] + _EPS:
         return _err("amount cannot exceed the charge's own amount", 400)
 
@@ -100,8 +95,7 @@ def delete_link(link_id):
 def get_links(txn_id):
     db = get_user_db(g.current_user["user_id"])
     txn = db.execute(
-        "SELECT id, direction, amount, expected_reimbursement, reimbursement_external "
-        "FROM transactions WHERE id = ?",
+        "SELECT id, direction, amount, awaiting_reimbursement FROM transactions WHERE id = ?",
         (txn_id,),
     ).fetchone()
     if txn is None:
@@ -134,9 +128,6 @@ def get_links(txn_id):
 
     received = sum(r["amount"] for r in as_outflow)
     applied = sum(r["amount"] for r in as_inflow)
-    outstanding = None
-    if txn["direction"] == "outflow" and txn["expected_reimbursement"] is not None and not txn["reimbursement_external"]:
-        outstanding = max(0.0, txn["expected_reimbursement"] - received)
 
     return _ok({
         "as_outflow": [dict(r) for r in as_outflow],
@@ -144,41 +135,24 @@ def get_links(txn_id):
         "received_total": received,
         "applied_total": applied,
         "inflow_remaining": (txn["amount"] - applied) if txn["direction"] == "inflow" else None,
-        "outstanding": outstanding,
     })
 
 
-@bp.get("/transactions/owed")
+@bp.get("/transactions/awaiting-reimbursement")
 @require_auth
-def list_owed():
+def list_awaiting_reimbursement():
     db = get_user_db(g.current_user["user_id"])
     rows = db.execute(
-        """
-        SELECT t.id, t.merchant_raw, t.amount, t.transaction_at, t.expected_reimbursement,
-               COALESCE((SELECT SUM(rl.amount) FROM reimbursement_links rl
-                         WHERE rl.outflow_id = t.id), 0) AS received
+        f"""
+        SELECT t.id, t.merchant_raw, t.amount, t.transaction_at,
+               {_received_sql("t")} AS received,
+               {_reimbursement_gap_sql("t")} AS gap
         FROM transactions t
-        WHERE t.direction = 'outflow'
-          AND t.expected_reimbursement IS NOT NULL
-          AND t.reimbursement_external = 0
+        WHERE t.direction = 'outflow' AND t.awaiting_reimbursement = 1
+        ORDER BY t.transaction_at
         """
     ).fetchall()
 
-    items = []
-    total = 0.0
-    for r in rows:
-        outstanding = max(0.0, r["expected_reimbursement"] - r["received"])
-        if outstanding > 0.005:
-            items.append({
-                "id": r["id"],
-                "merchant_raw": r["merchant_raw"],
-                "amount": r["amount"],
-                "transaction_at": r["transaction_at"],
-                "expected_reimbursement": r["expected_reimbursement"],
-                "received": r["received"],
-                "outstanding": outstanding,
-            })
-            total += outstanding
-
-    items.sort(key=lambda o: o["transaction_at"])
-    return _ok({"items": items, "total_outstanding": total})
+    items = [dict(r) for r in rows]
+    total_gap = sum(r["gap"] for r in items)
+    return _ok({"items": items, "total_gap": total_gap})

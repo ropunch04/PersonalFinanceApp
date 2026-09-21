@@ -34,20 +34,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_at TEXT    NOT NULL,
     created_at     TEXT    NOT NULL,
     source_hash    TEXT    UNIQUE,
-    reimburses_id  INTEGER REFERENCES transactions(id),
-    reimbursement_status TEXT CHECK(reimbursement_status IN ('partial', 'expensed')),
-    reimbursement_mode  TEXT CHECK(reimbursement_mode IN ('flat', 'percent')),
-    reimbursement_value REAL,
-    expected_reimbursement REAL,
-    reimbursement_external INTEGER NOT NULL DEFAULT 0
+    awaiting_reimbursement INTEGER NOT NULL DEFAULT 0
 );
 
 -- A payment (inflow) can be applied, in whole or in part, against one or
 -- more charges (outflows) — and one charge can be paid down by several
--- payments. This replaces the single reimburses_id column above for any
--- transaction created after this table was introduced; reimburses_id is
--- kept only so older rows still read correctly, and is migrated into this
--- table on first touch (see _migrate()).
+-- payments.
 CREATE TABLE IF NOT EXISTS reimbursement_links (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     inflow_id    INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
@@ -107,31 +99,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         pass  # column already exists
 
     try:
-        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_status TEXT")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
-
-    try:
-        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_mode TEXT")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
-
-    try:
-        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_value REAL")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
-
-    try:
-        conn.execute("ALTER TABLE transactions ADD COLUMN expected_reimbursement REAL")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
-
-    try:
-        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_external INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE transactions ADD COLUMN awaiting_reimbursement INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     except Exception:
         pass  # column already exists
@@ -154,6 +122,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.commit()
 
     _migrate_reimbursements(conn)
+    _migrate_awaiting_reimbursement(conn)
     rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()
     distinct_orders = conn.execute("SELECT COUNT(DISTINCT sort_order) AS n FROM categories").fetchone()["n"]
     if len(rows) > 1 and distinct_orders <= 1:
@@ -172,10 +141,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def _migrate_reimbursements(conn: sqlite3.Connection) -> None:
     """One-time backfill from the old reimburses_id / status columns into the
-    new reimbursement_links table and expected_reimbursement column. Both
-    steps are guarded so they only ever run once per DB, and are no-ops on a
-    DB that never had the old data (fresh installs, or a DB already migrated).
+    new reimbursement_links table and expected_reimbursement column, then
+    drops those legacy columns entirely. Guarded on the columns' presence, so
+    this is a no-op on a DB that's already been through it (or a fresh
+    install that never had them) — safe to call on every connection.
     """
+    legacy_cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()}
+    if "reimburses_id" not in legacy_cols:
+        return
+
+    # This backfill writes into expected_reimbursement / reimbursement_external,
+    # which are themselves legacy by now (see _migrate_awaiting_reimbursement) —
+    # but a DB this old may not have them yet either, so provision them here,
+    # just long enough for that later step to fold them into
+    # awaiting_reimbursement and drop them for good.
+    if "expected_reimbursement" not in legacy_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN expected_reimbursement REAL")
+    if "reimbursement_external" not in legacy_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN reimbursement_external INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
     links_exist = conn.execute("SELECT COUNT(*) AS n FROM reimbursement_links").fetchone()["n"]
     if links_exist == 0:
         legacy_links = conn.execute(
@@ -190,28 +175,62 @@ def _migrate_reimbursements(conn: sqlite3.Connection) -> None:
             )
             conn.commit()
 
-    legacy_status = conn.execute(
-        """
-        SELECT id, amount, reimbursement_status, reimbursement_mode, reimbursement_value
-        FROM transactions
-        WHERE reimbursement_status IS NOT NULL AND expected_reimbursement IS NULL
-        """
-    ).fetchall()
-    for row in legacy_status:
-        if row["reimbursement_status"] == "expensed":
-            expected, external = row["amount"], 1
-        elif row["reimbursement_mode"] == "flat":
-            expected, external = min(row["reimbursement_value"] or 0, row["amount"]), 0
-        elif row["reimbursement_mode"] == "percent":
-            expected, external = row["amount"] * (row["reimbursement_value"] or 0) / 100.0, 0
-        else:
-            continue
-        conn.execute(
-            "UPDATE transactions SET expected_reimbursement = ?, reimbursement_external = ? WHERE id = ?",
-            (expected, external, row["id"]),
-        )
-    if legacy_status:
-        conn.commit()
+    if "reimbursement_status" in legacy_cols:
+        legacy_status = conn.execute(
+            """
+            SELECT id, amount, reimbursement_status, reimbursement_mode, reimbursement_value
+            FROM transactions
+            WHERE reimbursement_status IS NOT NULL AND expected_reimbursement IS NULL
+            """
+        ).fetchall()
+        for row in legacy_status:
+            if row["reimbursement_status"] == "expensed":
+                expected, external = row["amount"], 1
+            elif row["reimbursement_mode"] == "flat":
+                expected, external = min(row["reimbursement_value"] or 0, row["amount"]), 0
+            elif row["reimbursement_mode"] == "percent":
+                expected, external = row["amount"] * (row["reimbursement_value"] or 0) / 100.0, 0
+            else:
+                continue
+            conn.execute(
+                "UPDATE transactions SET expected_reimbursement = ?, reimbursement_external = ? WHERE id = ?",
+                (expected, external, row["id"]),
+            )
+        if legacy_status:
+            conn.commit()
+
+    for col in ("reimburses_id", "reimbursement_status", "reimbursement_mode", "reimbursement_value"):
+        try:
+            conn.execute(f"ALTER TABLE transactions DROP COLUMN {col}")
+        except Exception:
+            pass  # already dropped, or this SQLite build predates DROP COLUMN
+    conn.commit()
+
+
+def _migrate_awaiting_reimbursement(conn: sqlite3.Connection) -> None:
+    """Folds the old amount-based expected_reimbursement / reimbursement_external
+    columns into a single awaiting_reimbursement boolean (a charge either is or
+    isn't flagged as waiting on a Venmo/Zelle-style reimbursement — clearing it
+    is always a manual "mark complete", not amount math), then drops the old
+    columns. Guarded on their presence, so a no-op once done (or on a fresh
+    install that never had them) — safe to call on every connection.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()}
+    if "expected_reimbursement" not in cols:
+        return
+
+    conn.execute(
+        "UPDATE transactions SET awaiting_reimbursement = 1 "
+        "WHERE expected_reimbursement IS NOT NULL AND awaiting_reimbursement = 0"
+    )
+    conn.commit()
+
+    for col in ("expected_reimbursement", "reimbursement_external"):
+        try:
+            conn.execute(f"ALTER TABLE transactions DROP COLUMN {col}")
+        except Exception:
+            pass  # already dropped, or this SQLite build predates DROP COLUMN
+    conn.commit()
 
 
 def get_user_db(user_id: int) -> sqlite3.Connection:

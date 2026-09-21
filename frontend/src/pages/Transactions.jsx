@@ -603,8 +603,6 @@ export default function Transactions() {
   const [splittingTxn, setSplittingTxn] = useState(null);
   const [reclassifyFrom, setReclassifyFrom] = useState(null);
   const [reimbSavingId, setReimbSavingId] = useState(null);
-  const [expectEditId, setExpectEditId] = useState(null);
-  const [expectValue, setExpectValue] = useState("");
 
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -753,35 +751,8 @@ export default function Transactions() {
     }
   }
 
-  function handleToggleExpensed(txn) {
-    if (txn.reimbursement_external) {
-      handleSetReimbursement(txn, { expected_reimbursement: null, reimbursement_external: false });
-    } else {
-      handleSetReimbursement(txn, { expected_reimbursement: txn.amount, reimbursement_external: true });
-    }
-  }
-
-  function openExpectEditor(txn) {
-    setExpectEditId(txn.id);
-    setExpectValue(
-      txn.expected_reimbursement != null && !txn.reimbursement_external
-        ? String(txn.expected_reimbursement)
-        : ""
-    );
-  }
-
-  function handleSaveExpected(txn) {
-    const value = parseFloat(expectValue);
-    if (isNaN(value) || value < 0 || value > txn.amount) {
-      alert(`Enter an amount between $0 and $${txn.amount}`);
-      return;
-    }
-    handleSetReimbursement(txn, { expected_reimbursement: value, reimbursement_external: false });
-  }
-
-  function handleClearExpected(txn) {
-    handleSetReimbursement(txn, { expected_reimbursement: null, reimbursement_external: false });
-    setExpectEditId(null);
+  function handleToggleAwaitingReimbursement(txn) {
+    handleSetReimbursement(txn, { awaiting_reimbursement: !txn.awaiting_reimbursement });
   }
 
   function toggleRow(id) {
@@ -1079,24 +1050,13 @@ export default function Transactions() {
                           Applied {fmtCurrency(t.applied_total, 2)}
                         </span>
                       )}
-                      {t.direction === "outflow" && t.expected_reimbursement != null && (
+                      {t.direction === "outflow" && t.awaiting_reimbursement && (
                         <span style={{
-                          fontSize: 10, fontWeight: 600,
-                          color: t.reimbursement_external ? "var(--green)" : "var(--amber)",
-                          border: `1px solid ${t.reimbursement_external ? "var(--green)" : "var(--amber)"}`,
-                          borderRadius: 4,
+                          fontSize: 10, fontWeight: 600, color: "var(--amber)",
+                          border: "1px solid var(--amber)", borderRadius: 4,
                           padding: "1px 5px", lineHeight: 1.4,
                         }}>
-                          {t.reimbursement_external ? "Expensed" : `Expect ${fmtCurrency(t.expected_reimbursement, 2)}`}
-                        </span>
-                      )}
-                      {t.direction === "outflow" && t.outstanding > 0.005 && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 600, color: "var(--red)",
-                          border: "1px solid var(--red)", borderRadius: 4,
-                          padding: "1px 5px", lineHeight: 1.4,
-                        }}>
-                          Owed {fmtCurrency(t.outstanding, 2)}
+                          Awaiting Reimbursement
                         </span>
                       )}
                       {pinnedIds.includes(t.id) && (
@@ -1199,95 +1159,19 @@ export default function Transactions() {
                                 </>
                               );
                             })()}
-                            {t.direction === "outflow" && t.expected_reimbursement != null && (
-                              <>
-                                <dt className="txn-meta-key">Excluded from budget</dt>
-                                <dd className="txn-meta-val" style={{ color: "var(--green)" }}>
-                                  {fmtCurrency(t.reimbursement_excluded_amount, 2)}
-                                  {t.reimbursement_external ? " (settled outside the app)" : " (expected)"}
-                                </dd>
-                              </>
-                            )}
-                            {t.direction === "outflow" && t.outstanding > 0.005 && (
-                              <>
-                                <dt className="txn-meta-key">Still owed to you</dt>
-                                <dd className="txn-meta-val" style={{ color: "var(--red)", fontWeight: 600 }}>
-                                  {fmtCurrency(t.outstanding, 2)}
-                                </dd>
-                              </>
-                            )}
                           </dl>
                           {t.direction === "outflow" && (
                             <div style={{ marginTop: 10 }}>
-                              <p className="field-label" style={{ marginBottom: 8 }}>Expect money back?</p>
-                              <div className="cat-pills">
-                                <button
-                                  className={`cat-pill${reimbSavingId === t.id ? " saving" : ""}`}
-                                  style={t.reimbursement_external
-                                    ? { borderColor: "var(--green)", color: "var(--green)" }
-                                    : {}}
-                                  disabled={reimbSavingId === t.id}
-                                  onClick={(e) => { e.stopPropagation(); handleToggleExpensed(t); }}
-                                >
-                                  {t.reimbursement_external ? "✓ Expensed" : "Expensed"}
-                                </button>
-                                <button
-                                  className={`cat-pill${reimbSavingId === t.id ? " saving" : ""}`}
-                                  style={t.expected_reimbursement != null && !t.reimbursement_external
-                                    ? { borderColor: "var(--amber)", color: "var(--amber)" }
-                                    : {}}
-                                  disabled={reimbSavingId === t.id}
-                                  onClick={(e) => { e.stopPropagation(); openExpectEditor(t); }}
-                                >
-                                  {t.expected_reimbursement != null && !t.reimbursement_external
-                                    ? `✓ Expect ${fmtCurrency(t.expected_reimbursement, 2)}`
-                                    : "Expect amount…"}
-                                </button>
-                                {t.expected_reimbursement != null && (
-                                  <button
-                                    className="cat-pill"
-                                    disabled={reimbSavingId === t.id}
-                                    onClick={(e) => { e.stopPropagation(); handleClearExpected(t); }}
-                                  >
-                                    Clear
-                                  </button>
-                                )}
-                              </div>
-                              {expectEditId === t.id && (
-                                <div
-                                  style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    max={t.amount}
-                                    step="0.01"
-                                    placeholder="e.g. 40.00"
-                                    value={expectValue}
-                                    onChange={(e) => setExpectValue(e.target.value)}
-                                    style={{
-                                      flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 8,
-                                      border: "1px solid var(--border)", background: "var(--surface-raised)",
-                                      color: "var(--text)", fontSize: 13,
-                                    }}
-                                  />
-                                  <button
-                                    className="btn btn-sm"
-                                    disabled={reimbSavingId === t.id}
-                                    onClick={() => handleSaveExpected(t)}
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => setExpectEditId(null)}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              )}
+                              <button
+                                className={`cat-pill${reimbSavingId === t.id ? " saving" : ""}`}
+                                style={t.awaiting_reimbursement
+                                  ? { borderColor: "var(--amber)", color: "var(--amber)" }
+                                  : {}}
+                                disabled={reimbSavingId === t.id}
+                                onClick={(e) => { e.stopPropagation(); handleToggleAwaitingReimbursement(t); }}
+                              >
+                                {t.awaiting_reimbursement ? "✓ Awaiting Reimbursement — tap to mark complete" : "Awaiting reimbursement?"}
+                              </button>
                             </div>
                           )}
                           <div className="txn-expanded-actions">
