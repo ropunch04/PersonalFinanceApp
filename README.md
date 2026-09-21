@@ -2,7 +2,13 @@
 
 # Personal Finance App
 
-A self-hosted personal finance tracker with a Flask/SQLite backend and a React 19 frontend. Designed to run on a Raspberry Pi (or any Linux box) and optionally exposed via Cloudflare Tunnel. Transactions can be imported from Capital One or Venmo CSV exports, or synced automatically from Gmail.
+A self-hosted personal finance tracker with a Flask/SQLite backend and a React 19 frontend.
+Designed to run on a Raspberry Pi (or any Linux box) and optionally exposed via a Cloudflare
+Tunnel. Transactions arrive via CSV import (Capital One, Amex, Venmo) or automatic Gmail
+sync (Capital One, Amex, Venmo, and Capital One Zelle notification emails).
+
+For a full walkthrough of what the app actually does, see **[FEATURES.md](./FEATURES.md)**.
+This README covers running and deploying it.
 
 ---
 
@@ -27,30 +33,46 @@ A self-hosted personal finance tracker with a Flask/SQLite backend and a React 1
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  React 19 (Vite)  ←  served as static files by Flask    │
-│  React Router v7, Recharts                               │
+│  React 19 (Vite), React Router v7, Recharts              │
+│  served as static files by Flask in production;          │
+│  served by the Vite dev server (proxying /api) in dev    │
 └────────────────────┬────────────────────────────────────┘
-                     │ /api/* (proxied in dev by Vite)
+                     │ /api/*
 ┌────────────────────▼────────────────────────────────────┐
-│  Flask (Gunicorn in production, 2 workers)               │
-│  Blueprints: auth, transactions, dashboard,              │
-│              categories, import, sync, profile, admin    │
+│  Flask (Gunicorn in production, 2 sync workers)          │
+│  Blueprints: auth, transactions, reimbursements,         │
+│    categories, dashboard, import, sync, profile, admin   │
 └────────┬───────────────────────────┬────────────────────┘
          │                           │
 ┌────────▼──────────┐   ┌────────────▼────────────────────┐
 │  data/master.db   │   │  data/user_{id}_finance.db       │
 │  (users table)    │   │  per-user: transactions,         │
-│                   │   │  categories, budgets, profile    │
+│                   │   │  reimbursement_links, categories,│
+│                   │   │  budgets, profile                │
 └───────────────────┘   └─────────────────────────────────┘
 ```
 
 **Key design decisions:**
 
-- **Per-user SQLite files.** Each user gets their own `data/user_{id}_finance.db`. There is no cross-user data sharing. `master.db` only holds the users table for login.
-- **JWT authentication.** Tokens are HS256, 7-day TTL, signed with `SECRET_KEY`. Every API route behind `@require_auth` validates the `Authorization: Bearer <token>` header.
-- **Fernet encryption for Gmail app passwords.** The app password is never stored in plaintext — it is encrypted with `ENCRYPTION_KEY` before being written to the `profile` table.
-- **APScheduler runs in the gunicorn master process** (via `on_starting` hook in `gunicorn.conf.py`) so only one scheduler instance runs across all workers.
-- **Flask serves the React build.** `npm run build` outputs to `frontend/dist/`, and Flask's SPA catch-all route serves `index.html` for all non-API paths.
+- **Per-user SQLite files.** Each account gets its own `data/user_{id}_finance.db`. There is
+  no cross-user data sharing anywhere — every query is scoped to the authenticated user's
+  own database file. `master.db` holds only the `users` table, used for login.
+- **JWT authentication.** Tokens are HS256, 7-day TTL, signed with `SECRET_KEY`. Every route
+  except `/api/auth/register` and `/api/auth/login` requires
+  `Authorization: Bearer <token>`, validated by the `@require_auth` decorator.
+- **Fernet encryption for Gmail app passwords.** Never stored in plaintext — encrypted with
+  `ENCRYPTION_KEY` before being written to the `profile` table.
+- **Automatic, idempotent schema migrations.** Every time a per-user database connection is
+  opened, `db_context._migrate()` brings its schema up to date (adds any missing columns,
+  creates the `reimbursement_links` table if absent, runs one-time data backfills). New
+  columns and tables added to the schema in code appear on existing databases the next time
+  they're opened — no manual `ALTER TABLE` step, on the Pi or anywhere else.
+- **APScheduler runs once, in the Gunicorn arbiter process** (`on_starting` hook in
+  `gunicorn.conf.py`), not inside a worker — so exactly one scheduler instance runs
+  regardless of worker count, and it survives worker restarts.
+- **Flask serves the React build in production.** `npm run build` outputs to
+  `frontend/dist/`; Flask's catch-all route serves `index.html` for any non-`/api` path
+  (client-side routing), and a real file under `dist/` for anything that matches one.
 
 ---
 
@@ -58,7 +80,7 @@ A self-hosted personal finance tracker with a Flask/SQLite backend and a React 1
 
 | Tool | Version |
 |------|---------|
-| Python | 3.11+ |
+| Python | 3.10+ (developed against 3.10; no version-specific syntax used beyond that) |
 | Node.js | 18+ |
 | npm | 9+ |
 
@@ -78,17 +100,12 @@ cd PersonalFinanceApp
 ### 2. Backend
 
 ```bash
-# Create and activate a virtual environment
 python3 -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
-
-# Install Python dependencies
 pip install -r requirements.txt
 ```
 
 ### 3. Create your `.env` file
-
-Copy the example and fill in the two required secrets (see [Environment Variables](#environment-variables)):
 
 ```bash
 cp deploy/env.production .env
@@ -97,10 +114,9 @@ cp deploy/env.production .env
 Minimal `.env` for local dev:
 
 ```env
-SECRET_KEY=<at-least-64-hex-chars>
+SECRET_KEY=<at-least-32-chars>
 ENCRYPTION_KEY=<fernet-key>
 DEBUG=true
-DB_PATH=data/finance.db
 ALLOWED_ORIGIN=http://localhost:5173
 RUN_SCHEDULER=false
 ```
@@ -108,21 +124,31 @@ RUN_SCHEDULER=false
 Generate the keys:
 
 ```bash
-# SECRET_KEY
+# SECRET_KEY (config.py requires at least 32 characters)
 python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# ENCRYPTION_KEY
+# ENCRYPTION_KEY (must be a valid Fernet key)
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+`config.py` validates all of this at import time and refuses to start the app if a required
+variable is missing, `SECRET_KEY` is too short, or `DEBUG`/`ALLOWED_ORIGIN` look
+inconsistent with each other (e.g. `DEBUG=true` against a non-localhost origin).
 
 ### 4. Run the backend
 
 ```bash
 python app.py
-# Starts on http://localhost:5100
+# Starts on http://0.0.0.0:5100 (dev only — see note below)
 ```
 
-The `data/` directory and both SQLite databases are created automatically on first run.
+The `data/` directory and `master.db` are created automatically on first run; each user's
+finance database is created the moment their account is registered.
+
+> Running `python app.py` directly binds `0.0.0.0`, i.e. reachable from your whole LAN,
+> which is fine for local development. **Production does not use this path** — it runs
+> under Gunicorn, which binds `127.0.0.1` only (see
+> [Production Deployment](#production-deployment-raspberry-pi)).
 
 ### 5. Frontend
 
@@ -131,31 +157,33 @@ cd frontend
 npm install
 npm run dev
 # Starts on http://localhost:5173
-# /api/* requests are proxied to localhost:5100 by Vite
+# /api/* requests are proxied to localhost:5100 by Vite (see vite.config.js)
 ```
 
 ### 6. Register your first account
 
-Open `http://localhost:5173` and register. By default `REGISTRATION_ENABLED` is not set so registration is open in dev. Set `REGISTRATION_ENABLED=false` in production after creating your account.
+Open `http://localhost:5173` and register. `REGISTRATION_ENABLED` is open by default (any
+value other than the literal string `"false"`, including leaving it unset) — set it to
+`false` once you've created the accounts you need, especially before exposing the app
+publicly.
 
 ---
 
 ## Environment Variables
 
-All variables are loaded from `.env` via `python-dotenv`. `config.py` validates them at startup — the app **will not start** if required vars are missing or inconsistent.
+All variables load from `.env` via `python-dotenv`. `config.py` validates them at startup —
+the app **will not start** if a required one is missing or looks inconsistent.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SECRET_KEY` | Yes | JWT signing key. Minimum 32 characters. Use `secrets.token_hex(32)`. |
-| `ENCRYPTION_KEY` | Yes | Fernet key for encrypting Gmail app passwords. Generate with `Fernet.generate_key()`. **Keep this stable** — if it changes, stored Gmail credentials become unreadable. |
-| `DEBUG` | Yes | `true` in development, `false` in production. Mismatching this with `ALLOWED_ORIGIN` raises a startup error. |
-| `ALLOWED_ORIGIN` | Yes | Frontend origin for CORS. `http://localhost:5173` in dev; your public URL in prod. |
-| `DB_PATH` | No | Path for `master.db`. Defaults to `data/finance.db` (the `master.db` is placed in the same directory). |
-| `RUN_SCHEDULER` | No | Set `true` to run APScheduler inside Flask (dev/single-process only). Leave `false` in production — gunicorn starts the scheduler via its `on_starting` hook instead. |
-| `REGISTRATION_ENABLED` | No | Any value other than `false` allows new registrations. Omit or set `false` in production. |
+| `ENCRYPTION_KEY` | Yes | Fernet key for encrypting Gmail app passwords. Generate with `Fernet.generate_key()`. **Keep this stable** — if it changes, every already-stored Gmail credential becomes undecryptable and must be re-entered. |
+| `DEBUG` | Yes | `true` in development, `false` in production. `config.py` raises a startup error if this doesn't match what `ALLOWED_ORIGIN` looks like (a localhost URL vs. a real domain). |
+| `ALLOWED_ORIGIN` | Yes | The single frontend origin allowed via CORS. `http://localhost:5173` in dev; your public URL in production. |
+| `DB_PATH` | No | Controls only where `master.db` is placed — its *directory* is used (`Path(DB_PATH).parent`), defaulting to `data/`; the filename portion is ignored. **Per-user finance databases are unaffected by this variable** — `db_context.get_db_path()` always writes them to a hardcoded `data/user_<id>_finance.db`, regardless of `DB_PATH`. In practice, leave this unset and everything lives under `data/`. |
+| `RUN_SCHEDULER` | No | Set `true` to also run APScheduler inside the Flask dev process (`python app.py`). Leave unset/`false` in production — Gunicorn's `on_starting` hook (`gunicorn.conf.py`) starts the scheduler once, in the arbiter, instead. |
+| `REGISTRATION_ENABLED` | No | Set to the literal string `false` to close public registration. Any other value, or leaving it unset, leaves registration open. |
 | `LOG_FILE` | No | Defaults to `logs/app.log`. |
-
-> **Critical:** `ENCRYPTION_KEY` is tied to the machine where Gmail credentials were saved. If you move to a new machine with a different key, re-enter Gmail credentials through the app so they get re-encrypted with the new key.
 
 ---
 
@@ -164,135 +192,242 @@ All variables are loaded from `.env` via `python-dotenv`. `config.py` validates 
 ### `data/master.db` — global users
 
 ```sql
-users (id, username, email, password_hash, is_admin, created_at, last_login_at)
+CREATE TABLE users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,
+    email         TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0 CHECK(is_admin IN (0, 1)),
+    created_at    TEXT    NOT NULL,
+    last_login_at TEXT
+);
 ```
 
-Passwords are hashed with bcrypt. This DB is never exposed to the frontend directly.
+Passwords are hashed with bcrypt (cost 12). This database is never exposed to the frontend
+directly — only individual fields via `/api/auth/me` and the admin endpoints.
 
 ### `data/user_{id}_finance.db` — per-user data
 
 ```sql
-categories   (id, name)
-transactions (id, amount, merchant_raw, direction, category_id, notes,
-              transaction_at, created_at, source_hash, reimburses_id)
-profile      (id=1, gmail_address, gmail_app_password_enc, last_synced_at, ...)
-budgets      (id, category_id, amount)
+categories (
+    id, name, sort_order, is_misc
+)
+
+transactions (
+    id, amount, merchant_raw, direction, category_id, notes,
+    transaction_at, created_at, source_hash,
+    reimburses_id,                -- legacy single-link column, superseded by reimbursement_links
+    reimbursement_status, reimbursement_mode, reimbursement_value,  -- legacy, superseded by expected_reimbursement
+    expected_reimbursement,       -- current: optimistic exclusion amount
+    reimbursement_external        -- current: 1 if settled outside the app entirely
+)
+
+reimbursement_links (
+    id, inflow_id, outflow_id, amount, created_at
+)
+
+budgets (
+    id, category_id, amount, period,       -- period: 'monthly' | 'yearly'
+    fold_into_misc                          -- 1 = pools into the Misc/Flex bucket
+)
+
+profile (
+    id=1, gmail_address, gmail_app_password_enc, last_synced_at,
+    created_at, updated_at
+)
 ```
 
 **Key fields:**
 
-- `direction` — `"inflow"` (money received) or `"outflow"` (money spent).
-- `source_hash` — SHA hash of the raw email/CSV row, used as a dedup key (`UNIQUE` constraint). Reimporting the same CSV will not create duplicates.
-- `reimburses_id` — FK pointing to an outflow transaction that this inflow reimburses. Enables the net-cost calculation. Multiple inflows can point to the same outflow (partial reimbursements).
+- `direction` — `"inflow"` (money received) or `"outflow"` (money spent). Amounts are always
+  stored positive; sign is purely presentational.
+- `source_hash` — a `UNIQUE` dedup key computed from the raw CSV row or email content.
+  Re-importing/re-syncing the same source never creates duplicate rows.
+- `reimbursement_links` is the current model for recording that a specific inflow pays back
+  a specific outflow (partially or fully; many-to-many). `reimburses_id` is an older,
+  single-link column kept only so pre-existing rows still read correctly — it's backfilled
+  into `reimbursement_links` automatically and should be treated as legacy.
+- `expected_reimbursement` / `reimbursement_external` let you mark an outflow as (partially)
+  not your own cost the moment you know it, before any money actually arrives.
 
-All connections use `PRAGMA journal_mode=WAL` for concurrent read safety and `PRAGMA foreign_keys=ON`.
-
-The schema is applied via `db_context.init_user_db()` which is idempotent (`CREATE TABLE IF NOT EXISTS`). A fresh user DB gets 9 default categories and an empty `profile` row automatically.
+All connections use `PRAGMA journal_mode=WAL` and `PRAGMA foreign_keys=ON`. Schema
+migrations (new columns, the `reimbursement_links` table, one-time backfills) are applied
+automatically and idempotently every time a per-user database is opened — see
+`db_context.py:_migrate()`. A fresh account gets 9 default categories, a zeroed budget row
+per category, and an empty `profile` row.
 
 ---
 
 ## API Reference
 
-All routes are prefixed `/api/`. Every route except auth requires `Authorization: Bearer <token>`.
+All routes are prefixed `/api/`. Every route except `POST /api/auth/register` and
+`POST /api/auth/login` requires `Authorization: Bearer <token>`. Every response is
+`{"data": ..., "error": null}` on success or `{"data": null, "error": "<message>"}` on
+failure, with an appropriate HTTP status.
 
 ### Auth — `/api/auth`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/auth/register` | Create account. Body: `{username, email, password}` |
-| `POST` | `/api/auth/login` | Returns `{token, user}`. Token TTL: 7 days. |
-| `GET` | `/api/auth/me` | Current user info. |
-| `PUT` | `/api/auth/me` | Update username/email. |
-| `PUT` | `/api/auth/me/password` | Change password. |
+| `POST` | `/register` | Create account. Body: `{username, email, password}`. 10/hour. |
+| `POST` | `/login` | Body: `{username, password}` (username or email). Returns `{token, user}`. 20/min, 100/hour. |
+| `POST` | `/change-password` | Body: `{current_password, new_password}`. 10/hour. |
+| `GET`  | `/me` | Current user info. |
 
 ### Transactions — `/api/transactions`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/transactions` | Paginated list. See query params below. |
-| `POST` | `/api/transactions` | Create manually. |
-| `PUT` | `/api/transactions/<id>` | Update. |
-| `DELETE` | `/api/transactions/<id>` | Delete. |
+| `GET` | `/transactions` | Paginated list. See query params below. |
+| `POST` | `/transactions` | Create manually. |
+| `GET` | `/transactions/<id>` | Fetch one. |
+| `PUT` | `/transactions/<id>` | Update. |
+| `DELETE` | `/transactions/<id>` | Delete. Add `?force=true` to confirm removing linked reimbursements too. |
+| `POST` | `/transactions/<id>/split` | Split into ≥2 parts. Body: `{parts: [{amount, category_id?, merchant_raw?, notes?}, ...]}`. |
+| `GET` | `/transactions/merchants/unclassified` | Merchant groups with no category yet, for bulk classify. |
+| `POST` | `/transactions/auto-classify` | Auto-assign categories to everything uncategorized, from history. |
+| `POST` | `/transactions/bulk-categorize` | Body: `{merchant_raw, category_id}`. |
+| `POST` | `/transactions/reclassify` | Body: `{merchant_raw, from_category_id, to_category_id}`. |
+| `GET` | `/transactions/linkable-outflows` | Outflows eligible to be reimbursed, for the link picker. |
+| `GET` | `/transactions/duplicates` | Grouped likely-duplicate rows for review. |
+| `GET` | `/transactions/owed` | Outflows with an unrealized `expected_reimbursement`. |
 
 **`GET /api/transactions` query params:**
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `limit` | int (max 200) | Page size. Default 25. |
+| `limit` | int (1–200) | Page size. Default 25. |
 | `offset` | int | Pagination offset. |
-| `date_from` | `YYYY-MM-DD` | Filter start date (inclusive). |
-| `date_to` | `YYYY-MM-DD` | Filter end date (inclusive, extended to 23:59:59). |
-| `category_id` | int | Filter by category. |
-| `status` | `pending` \| `confirmed` | `pending` = uncategorized, `confirmed` = categorized. |
+| `date_from` / `date_to` | `YYYY-MM-DD` | Inclusive range filter. |
+| `category_id` | int | Filter by category (combinable with `status`). |
+| `status` | `pending` \| `confirmed` | `pending` = uncategorized outflows; `confirmed` = categorized. |
 | `q` | string | Free-text search across merchant, notes, amount. |
-| `source` | `venmo` \| `credit` | Filter by transaction source. |
+| `source` | `venmo` \| `credit` | Filter by inferred source. |
 | `sort` | string | `date_desc` (default), `date_asc`, `amount_desc`, `amount_asc`, `merchant_asc`. |
-| `include_ids` | comma-separated ints | Always include these transaction IDs regardless of other filters (used for pinned transactions). |
+| `include_ids` | comma-separated ints | Always include these ids regardless of other filters (pinning). |
+
+### Reimbursements — `/api`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/reimbursement-links` | Body: `{inflow_id, outflow_id, amount}`. |
+| `DELETE` | `/reimbursement-links/<id>` | Remove a link. |
+| `GET` | `/transactions/<id>/links` | Every link involving this transaction, either direction. |
+
+### Categories — `/api/categories`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/categories` | List, ordered by `sort_order`. |
+| `POST` | `/categories` | Body: `{name}`. |
+| `DELETE` | `/categories/<id>` | 409 if any transaction still references it. |
+| `PUT` | `/categories/reorder` | Body: `{order: [id, id, ...]}` — every id, exactly once. |
+| `PUT` | `/categories/<id>/misc` | Body: `{is_misc}` — enforces exactly one Misc category. |
 
 ### Dashboard — `/api/dashboard`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/dashboard` | Totals, category breakdown, pending count. |
-| `GET` | `/api/dashboard/trend` | Monthly spending trend (bar chart data). |
-| `GET` | `/api/dashboard/merchants` | Top merchants by net spend + largest transaction. |
-| `GET` | `/api/dashboard/comparison` | Current vs previous period comparison. |
+| `GET` | `/dashboard` | Totals, category breakdown, flex pool, pending count. |
+| `GET` | `/dashboard/trend` | Spending/income series (daily/weekly/monthly, auto-picked). |
+| `GET` | `/dashboard/merchants` | Top merchants, largest transaction, repeat merchants. |
+| `GET` | `/dashboard/comparison` | Current vs. previous period, deltas, month-end projection. |
 
-All dashboard endpoints accept `start_date`, `end_date`, and `include_ids` query params.
-
-### Categories — `/api/categories`
-
-CRUD for categories. `GET /api/categories/unclassified-merchants` returns merchants with uncategorized transactions for bulk-classify workflow.
+All four accept `start_date`, `end_date` (default: month-to-date). `/dashboard`,
+`/dashboard/merchants`, and `/dashboard/comparison` also accept `include_ids` for pinned
+transactions; `/dashboard/trend` deliberately does not (see
+[FEATURES.md](./FEATURES.md#transactions) on pinning) — its fixed daily/weekly/monthly
+buckets have nowhere to place a pinned date outside the chart's own range.
 
 ### Import — `/api/import`
 
-`POST /api/import/csv` — multipart form upload. Accepts Capital One or Venmo CSV files. Field: `source` (`capitalone` | `venmo`), `file` (one or more CSVs).
+`POST /api/import/transactions` — multipart form upload. Fields: `source_type`
+(`capitalone` | `venmo` | `amex`), `file` (repeatable — multiple files in one request).
 
-### Sync — `/api/sync`
+### Sync — `/api`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/sync/status` | Last sync time, credentials configured flag. |
-| `POST` | `/api/sync/now` | Trigger manual Gmail sync. |
+| `GET` | `/sync/status` | Whether Gmail is configured and when it last synced. |
+| `POST` | `/sync` | Trigger a synchronous sync now. |
+| `PUT` | `/profile/gmail` | Save Gmail credentials (does a live IMAP login check first). |
+| `DELETE` | `/profile/gmail` | Disconnect Gmail. |
 
 ### Profile — `/api/profile`
 
-`GET`/`PUT` for category budgets and Gmail credentials.
+`GET` / `PUT` — category budgets (`{budgets: [{category_id, amount, period, fold_into_misc}, ...]}`).
+
+### Admin — `/api/admin` (all require `is_admin`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/users` | List every account. |
+| `POST` | `/users` | Create an account. |
+| `PUT` | `/users/<id>` | Update username/email/admin flag. |
+| `POST` | `/users/<id>/reset-password` | Set a new password for another user. |
+| `DELETE` | `/users/<id>` | Delete an account and its finance database. |
+| `POST` | `/users/<id>/sync` | Trigger a sync for another user. |
+| `GET` | `/system` | Uptime, user count, runtime info. |
+| `GET` | `/logs` | Tail of the application log. |
 
 ---
 
 ## Authentication & Security
 
 **Flow:**
-1. `POST /api/auth/login` → bcrypt verifies password → returns a signed JWT.
-2. Frontend stores the token in `localStorage` and attaches it as `Authorization: Bearer <token>` on every request.
-3. `@require_auth` decorator decodes and validates the token, sets `g.current_user`.
-4. `@require_admin` can be stacked after `@require_auth` for admin-only routes.
+1. `POST /api/auth/login` → bcrypt verifies the password → a signed JWT is returned.
+2. The frontend stores the token in `localStorage` (`finance_token`) and attaches it as
+   `Authorization: Bearer <token>` on every request.
+3. `@require_auth` decodes and validates the token and populates `g.current_user` from its
+   claims.
+4. `@require_admin` stacks after `@require_auth` for admin-only routes, checking the
+   `is_admin` claim.
 
-**Token structure:**
+**Token payload:**
 ```json
-{ "sub": "1", "username": "alice", "is_admin": false, "exp": <7 days from now> }
+{ "sub": "1", "username": "alice", "is_admin": false, "exp": <unix timestamp, 7 days out> }
 ```
 
-**CORS:** The `ALLOWED_ORIGIN` env var is checked at startup and used for CORS headers. The startup guard prevents running with `DEBUG=true` against a production origin (and vice versa) to catch accidental misconfigurations.
+**CORS/CSP:** `ALLOWED_ORIGIN` is the only origin ever granted CORS headers, checked at
+startup for consistency with `DEBUG`. Every response carries a Content-Security-Policy,
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
+`Referrer-Policy: strict-origin-when-cross-origin`.
+
+**Rate limiting:** keyed on `CF-Connecting-IP` when present (so requests through the
+Cloudflare Tunnel resolve to the real visitor, not the tunnel daemon), falling back to the
+request's remote address otherwise. Limits are per-process (`memory://` storage) — with 2
+Gunicorn workers, effective limits can run up to ~2x the configured number, and all counters
+reset on a restart. Acceptable for a small, owner-operated deployment; upgrade to a shared
+store (e.g. Redis) if you need a hard global limit.
 
 ---
 
 ## Gmail Sync
 
-The app can read Capital One and Venmo transaction notification emails directly from a Gmail inbox using IMAP.
+The app reads bank/payment notification emails directly from a Gmail inbox over IMAP —
+no OAuth, no Google API project required, just an app password.
 
-**Setup (per user):**
-1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) on the Gmail account.
+**Setup (per user, from Profile → Gmail Setup):**
+1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification)
+   on the Gmail account.
 2. Generate a [Gmail App Password](https://myaccount.google.com/apppasswords).
-3. Enter the Gmail address and app password in the app's Profile → Gmail Setup page.
-4. The app password is encrypted with `ENCRYPTION_KEY` before being stored in `profile.gmail_app_password_enc`.
+3. Enter the Gmail address and app password. The app performs a live IMAP login check
+   before saving, so a typo is caught immediately rather than failing silently overnight.
+4. The password is Fernet-encrypted (`ENCRYPTION_KEY`) before being written to
+   `profile.gmail_app_password_enc` — never stored in plaintext.
 
-**Sync schedule:** Runs daily at 3:00 AM via APScheduler. In production, the scheduler lives in the gunicorn master process (started by `on_starting` in `gunicorn.conf.py`). It iterates all users, decrypts their app passwords, fetches unread notification emails, parses them, and inserts deduplicated transactions.
+**What it parses:** Capital One purchase/credit alerts, Amex "Large Purchase Approved"
+alerts, Venmo payment/charge notifications, and Capital One Zelle transfers (sent and
+received).
 
-**Manual sync:** Available via the sync button on the Home page (calls `POST /api/sync/now`).
+**Schedule:** Daily at 3:00 AM, via APScheduler started once in the Gunicorn arbiter process
+(`on_starting` in `gunicorn.conf.py`) — not per-worker, so it can't run twice concurrently.
+"Sync now" on the Home/Profile page triggers the same logic immediately.
 
-**Email parsing:** `services/email_parser.py` uses BeautifulSoup to parse HTML emails from Capital One and Venmo. Each parsed transaction gets a `source_hash` derived from the raw email content — re-syncing the same emails will not create duplicates.
+**Dedup & safety:** Each parsed email gets a stable hash from its Message-ID; re-syncing
+never re-imports. An email is only marked `\Seen` once it's been **successfully** parsed —
+one your parser doesn't yet recognize stays unread and is retried on the next sync, rather
+than being silently marked read and lost.
 
 ---
 
@@ -300,195 +435,71 @@ The app can read Capital One and Venmo transaction notification emails directly 
 
 ```
 frontend/src/
-├── api.js                    # All API calls — single source of truth for backend URLs
-├── App.jsx                   # Router setup, nav bar, auth gate
+├── api.js                        # All API calls — single source of truth for backend URLs
+├── App.jsx                       # Router, bottom nav, auth gate, top-level error boundary
+├── format.js                     # Shared currency formatting
 ├── pages/
-│   ├── Dashboard.jsx         # Home page — stat tiles, charts, category breakdown
-│   ├── Transactions.jsx      # Full transaction list with filters, sort, pagination
-│   ├── Profile.jsx           # Category budgets, Gmail credentials, account settings
-│   ├── GmailSetup.jsx        # Gmail IMAP setup instructions
+│   ├── Dashboard.jsx             # Home — stat tiles, charts, category breakdown
+│   ├── Transactions.jsx          # Full transaction list: filters, sort, pagination, modals
+│   ├── Profile.jsx               # Category budgets, Gmail credentials, account settings
+│   ├── GmailSetup.jsx            # Gmail IMAP setup instructions
+│   ├── Import.jsx                # CSV import UI
 │   ├── Login.jsx / Register.jsx
-│   ├── Import.jsx            # CSV import UI
-│   └── Admin.jsx             # User management (admin only)
+│   └── Admin.jsx                 # User management (admin only)
 ├── components/
-│   ├── CategoryBreakdown.jsx # Category list with budget progress bars
-│   ├── CategoryDonut.jsx     # Donut chart (Recharts)
-│   ├── SpendingTrendChart.jsx # Monthly bar chart (Recharts)
-│   ├── MerchantInsights.jsx  # Top merchants, largest transaction, recurring
-│   ├── ComparisonCard.jsx    # Current vs previous period delta
-│   ├── PinPickerModal.jsx    # Search and pin transactions outside the date range
-│   ├── ReimbursePickerModal.jsx # Link an inflow to an outflow it reimburses
-│   └── DuplicatesModal.jsx   # Review and delete duplicate transactions
+│   ├── CategoryBreakdown.jsx     # Category list with budget progress bars
+│   ├── CategoryDonut.jsx         # Donut chart (Recharts)
+│   ├── CategoryEditModal.jsx / CategoryPicker.jsx
+│   ├── SpendingTrendChart.jsx    # Spend/income line chart (Recharts)
+│   ├── MerchantInsights.jsx      # Top merchants, largest transaction, repeat merchants
+│   ├── ComparisonCard.jsx        # Current vs. previous period delta
+│   ├── BudgetByCategoryWidget.jsx
+│   ├── OwedWidget.jsx            # Outstanding-reimbursement tracker
+│   ├── PinPickerModal.jsx        # Search and pin transactions outside the date range
+│   ├── ReimbursePickerModal.jsx  # Link an inflow to an outflow it reimburses
+│   ├── SplitModal.jsx / DuplicatesModal.jsx
+│   ├── InstallPrompt.jsx
+│   └── ProtectedRoute.jsx
 ├── hooks/
-│   ├── useDashboardFilters.js  # Range selection, custom dates, pinned IDs — all persisted to localStorage
-│   └── usePwaSync.js           # Background sync on PWA resume
+│   ├── useDashboardFilters.js    # Range selection, custom dates, pinned ids — localStorage-backed
+│   ├── useDashboardWidgets.js    # Widget visibility/order — localStorage-backed
+│   └── usePwaSync.js             # Re-sync on app resume/visibility change
 └── context/
-    ├── AuthContext.jsx       # JWT storage, login/logout
-    └── OnlineContext.jsx     # navigator.onLine listener
+    ├── AuthContext.jsx           # Token storage, login/logout, current user
+    └── OnlineContext.jsx         # navigator.onLine listener
 ```
 
-**State persistence (localStorage):**
+**localStorage keys:**
 
 | Key | Contents |
 |-----|----------|
-| `auth_token` | JWT string |
+| `finance_token` | The JWT |
 | `dashboard_range` | Active range value (`this_month`, `custom`, etc.) |
-| `dashboard_custom_start` / `dashboard_custom_end` | Custom date range |
-| `pinned_txn_ids` | JSON array of pinned transaction IDs — shared between Dashboard and Transactions pages |
-
-**Pinned transactions:** The Dashboard allows pinning transactions outside the active date range so they still appear in all metrics. The same `pinned_txn_ids` localStorage key is read by the Transactions page — when a date filter is active and pins exist, the frontend adds `include_ids=<csv>` to the API call so pinned rows always appear in the list.
-
-**Reimbursements:** An inflow transaction can be linked to an outflow via `reimburses_id`. Multiple inflows can reimburse the same outflow. The outflow row shows a "Net" badge and full net-cost breakdown in the expanded view.
+| `dashboard_custom_start` / `dashboard_custom_end` | Custom date range bounds |
+| `pinned_txn_ids` | JSON array of pinned transaction ids — shared between Dashboard and Transactions |
+| `dashboard_widgets_v1` | Widget order/visibility |
 
 ---
 
 ## Production Deployment (Raspberry Pi)
 
-### 1. Rsync the project to the Pi
+See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook — rsync deploy steps, systemd
+service setup, the Cloudflare Tunnel config, backup/restore procedure, and troubleshooting.
+The short version:
 
-Run this **on your Mac**, not the Pi:
-
-```bash
-rsync -avz --exclude='.env' --exclude='venv/' --exclude='frontend/node_modules/' \
-      --exclude='frontend/dist/' --exclude='data/' --exclude='logs/' \
-      --exclude='__pycache__/' \
-      /path/to/PersonalFinanceApp/ rohitpras@<pi-ip>:~/PersonalFinanceApp/
-```
-
-### 2. On the Pi — first-time setup
-
-```bash
-cd ~/PersonalFinanceApp
-
-# Python environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Node / frontend build
-cd frontend
-npm install
-npm run build
-cd ..
-
-# Create production .env from the template
-cp deploy/env.production .env
-# Edit .env — fill in SECRET_KEY, ENCRYPTION_KEY, ALLOWED_ORIGIN
-nano .env
-
-# Create required directories
-mkdir -p data logs
-```
-
-### 3. Install systemd service
-
-```bash
-sudo cp deploy/finance-app.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable finance-app
-sudo systemctl start finance-app
-
-# Check status
-sudo systemctl status finance-app
-sudo journalctl -u finance-app -f
-```
-
-The service runs gunicorn on `0.0.0.0:5100`. The app is accessible at `http://<pi-ip>:5100` on your local network.
-
-### 4. Deploying updates
-
-Run all three commands **from your Mac**. The `data/` and `.env` excludes mean user databases and secrets are never touched, regardless of what changed in the codebase.
-
-```bash
-# Step 1 — sync code to the Pi (safe to run anytime; never overwrites data/ or .env)
-rsync -avz \
-  --exclude='.env' \
-  --exclude='venv/' \
-  --exclude='frontend/node_modules/' \
-  --exclude='frontend/dist/' \
-  --exclude='data/' \
-  --exclude='logs/' \
-  --exclude='__pycache__/' \
-  /path/to/PersonalFinanceApp/ rohitpras@<pi-ip>:~/PersonalFinanceApp/
-
-# Step 2 — rebuild the frontend (only needed if you changed any frontend code)
-ssh rohitpras@<pi-ip> "cd ~/PersonalFinanceApp/frontend && npm run build"
-
-# Step 3 — restart the service to pick up backend changes
-ssh rohitpras@<pi-ip> "sudo systemctl restart finance-app"
-```
-
-**What rsync never touches on the Pi:**
-
-| Path | Why it's excluded |
-|------|-------------------|
-| `data/` | All SQLite databases — master + every user's finance DB |
-| `.env` | Production secret keys |
-| `logs/` | Runtime log files |
-| `venv/` | Python environment (already installed) |
-| `frontend/node_modules/` | npm packages (already installed) |
-| `frontend/dist/` | Built assets — rebuilt separately in step 2 |
-
-**Backend-only change** (no frontend edits): skip step 2, just steps 1 and 3.
-
-**Frontend-only change**: all three steps — rsync delivers the source, step 2 rebuilds the bundle, step 3 restarts so Flask serves the new `dist/`.
-
-**New Python dependency added** (`requirements.txt` changed): after step 1, run:
-
-```bash
-ssh rohitpras@<pi-ip> "cd ~/PersonalFinanceApp && source venv/bin/activate && pip install -r requirements.txt"
-```
-
-Then proceed to step 3.
-
-#### Schema migrations
-
-The schema uses `CREATE TABLE IF NOT EXISTS`, so **new tables** are created automatically on the next restart. However, **new columns on existing tables** are not — you must run `ALTER TABLE` manually on the Pi for each affected database.
-
-```bash
-ssh rohitpras@<pi-ip>
-cd ~/PersonalFinanceApp
-source venv/bin/activate
-
-# Run for master.db if users table changed
-python3 -c "
-import sqlite3
-conn = sqlite3.connect('data/master.db')
-conn.execute('ALTER TABLE users ADD COLUMN new_col TEXT')
-conn.commit(); conn.close()
-"
-
-# Run for each user's finance DB
-python3 -c "
-import sqlite3, glob
-for path in glob.glob('data/user_*_finance.db'):
-    conn = sqlite3.connect(path)
-    conn.execute('ALTER TABLE transactions ADD COLUMN new_col TEXT')
-    conn.commit(); conn.close()
-    print('migrated', path)
-"
-```
-
-Then restart the service.
-
-### 5. Logs
-
-```bash
-# App logs
-tail -f ~/PersonalFinanceApp/logs/app.log
-
-# Gunicorn access log
-tail -f ~/PersonalFinanceApp/logs/access.log
-
-# Systemd journal
-sudo journalctl -u finance-app -f
-```
+- Gunicorn binds `127.0.0.1:5100` only (`gunicorn.conf.py`) — reachable exclusively through
+  whatever reverse proxy/tunnel you put in front of it. This is **not** the same as running
+  `python app.py` directly, which binds `0.0.0.0` for local dev convenience.
+- `data/`, `.env`, and `logs/` are never touched by a code deploy (rsync excludes them) —
+  updating the app never risks your databases or secrets.
+- New schema columns/tables apply themselves automatically on the next request after a
+  restart; no manual `ALTER TABLE` step is needed on the server.
 
 ---
 
 ## GitHub & SQLite — What to Commit
 
-**The `.gitignore` already excludes the right things:**
+**`.gitignore` already excludes:**
 
 ```
 data/*.db        # All SQLite database files — contain real financial data
@@ -501,34 +512,29 @@ frontend/node_modules/
 frontend/dist/
 ```
 
-**What this means practically:**
-
-- **Never commit `data/`** — it contains your personal financial transactions, Gmail app passwords (encrypted but still private), and user accounts. Add it to `.gitignore` and keep it there.
-- **Never commit `.env`** — it contains your `SECRET_KEY` and `ENCRYPTION_KEY`. If these leak, anyone can forge JWTs and decrypt stored credentials.
-- The database schema lives in `db_context.py` and `models/user.py` — the actual `.db` files are created at runtime from code, so nothing is lost by excluding them from git.
-- If you want to back up your data, use `sqlite3` directly or copy the `data/` directory to a safe location (external drive, encrypted cloud storage). **Do not use git for this.**
-
-**Backup your production databases manually:**
-
-```bash
-# On the Pi
-sqlite3 ~/PersonalFinanceApp/data/master.db ".backup /path/to/backup/master.db"
-sqlite3 ~/PersonalFinanceApp/data/user_1_finance.db ".backup /path/to/backup/user_1_finance.db"
-```
+- **Never commit `data/`** — it holds real transactions, encrypted Gmail credentials, and
+  account records.
+- **Never commit `.env`** — it holds `SECRET_KEY` and `ENCRYPTION_KEY`. If these leak,
+  anyone can forge JWTs and decrypt stored Gmail passwords.
+- The schema lives in code (`db_context.py`, `models/user.py`) — nothing is lost by
+  excluding the `.db` files; they're recreated from scratch by that code.
+- To back up your data, copy the `data/` directory (or use `sqlite3 .backup`, see
+  `DEPLOYMENT.md`) to a safe location. **Do not use git for this.**
 
 ---
 
 ## Linting & Formatting
 
 ```bash
-# Run all linters
-make lint
-
-# Auto-fix
-make format
+make lint      # ruff check . && cd frontend && npx eslint src/
+make format    # ruff format . && cd frontend && npx eslint src/ --fix
 ```
 
-Backend uses [Ruff](https://docs.astral.sh/ruff/) (`ruff.toml`). Frontend uses ESLint with `eslint-plugin-react-hooks` and `eslint-plugin-react-refresh`.
+> `ruff` is not currently pinned in `requirements.txt` — install it separately into your venv
+> (`pip install ruff`) or globally (`pipx install ruff`) before running `make lint`.
+
+Backend uses [Ruff](https://docs.astral.sh/ruff/) (`ruff.toml`). Frontend uses ESLint with
+`eslint-plugin-react-hooks` and `eslint-plugin-react-refresh`.
 
 Individual commands:
 

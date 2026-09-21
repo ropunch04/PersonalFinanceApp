@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Component, useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { OnlineProvider } from "./context/OnlineContext";
@@ -51,6 +51,36 @@ function IconAdmin() {
   );
 }
 
+// There was no error boundary anywhere in the tree. A handful of known
+// TypeErrors (a non-array from localStorage, a null dereference in a widget)
+// used to take down the entire app to a blank white screen with nothing in
+// the UI to explain why.
+class ErrorBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Unhandled error in app tree:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, textAlign: "center" }}>
+          <p style={{ marginBottom: 12 }}>Something went wrong.</p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function NavItem({ to, icon, label, badge, end }) {
   return (
     <NavLink to={to} title={label} end={end}>
@@ -96,11 +126,11 @@ function AppContent() {
   const [pendingCount, setPendingCount] = useState(0);
 
   return (
-    <>
+    <ErrorBoundary>
       <AppRoutes setPendingCount={setPendingCount} />
       <BottomNav pendingCount={pendingCount} />
       <InstallPrompt />
-    </>
+    </ErrorBoundary>
   );
 }
 

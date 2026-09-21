@@ -17,9 +17,15 @@ export default function CategoryBreakdown({ categories, flexPoolRatio, selectedI
 
   if (!categories || categories.length === 0) return null;
 
+  // A yearly-budget category's `spent` is scoped to the currently-viewed
+  // window (so it sums correctly into the donut/tile total alongside every
+  // other category); its budget-tracking display uses `spent_ytd` instead,
+  // since "yearly" means the progress bar tracks the whole calendar year.
+  const displaySpent = (c) => (c.period === "yearly" ? c.spent_ytd ?? c.spent : c.spent ?? 0);
+
   const filtered   = selectedId ? categories.filter((c) => c.category_id === selectedId) : categories;
-  const withSpend  = filtered.filter((c) => c.spent > 0);
-  const zeroSpend  = selectedId ? [] : categories.filter((c) => c.spent <= 0);
+  const withSpend  = filtered.filter((c) => displaySpent(c) > 0);
+  const zeroSpend  = selectedId ? [] : categories.filter((c) => displaySpent(c) <= 0);
   const visible    = showEmpty ? filtered : withSpend;
 
   return (
@@ -30,7 +36,7 @@ export default function CategoryBreakdown({ categories, flexPoolRatio, selectedI
 
       {visible.map((cat) => {
         const budget = cat.budget ?? 0;
-        const spent  = cat.spent  ?? 0;
+        const spent  = displaySpent(cat);
         const ratio  = cat.is_flex ? (flexPoolRatio ?? 0) : (budget > 0 ? spent / budget : 0);
         const fill   = cat.is_flex || budget > 0 ? barColor(ratio) : "#94A3B8";
         const width  = cat.is_flex || budget > 0 ? `${Math.min(ratio * 100, 100)}%` : "0%";

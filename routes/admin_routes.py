@@ -24,6 +24,18 @@ from services import sync_service
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
+_MAX_PASSWORD_BYTES = 72
+
+
+def _validate_password(password: str) -> str | None:
+    """Returns an error message if invalid, else None. Mirrors auth_routes'
+    checks — bcrypt raises ValueError above 72 bytes rather than truncating."""
+    if len(password) < 8:
+        return "Password must be at least 8 characters"
+    if len(password.encode()) > _MAX_PASSWORD_BYTES:
+        return f"Password must be at most {_MAX_PASSWORD_BYTES} bytes"
+    return None
+
 
 def _user_with_finance(user: dict) -> dict:
     try:
@@ -64,12 +76,16 @@ def create_user_route():
     if not username or not email or not password:
         return _err("username, email, and password are required", 400)
 
+    password_error = _validate_password(password)
+    if password_error:
+        return _err(password_error, 400)
+
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
     try:
         user_id = create_user(username, email, password_hash, is_admin=is_admin)
-    except Exception as e:
-        return _err(str(e), 409)
+    except sqlite3.IntegrityError:
+        return _err("Username or email already in use", 409)
 
     init_user_db(user_id)
     user = _user_with_finance(dict(get_user_by_id(user_id)))
@@ -93,10 +109,12 @@ def update_user_route(user_id):
 
     try:
         updated = update_user(user_id, fields)
+    except LookupError:
+        return _err("User not found", 404)
     except ValueError as e:
         return _err(str(e), 400)
-    except Exception as e:
-        return _err(str(e), 409)
+    except sqlite3.IntegrityError:
+        return _err("Username or email already in use", 409)
 
     return _ok(updated)
 
@@ -110,6 +128,13 @@ def reset_password(user_id):
 
     if not new_password:
         return _err("new_password is required", 400)
+
+    password_error = _validate_password(new_password)
+    if password_error:
+        return _err(password_error, 400)
+
+    if not get_user_by_id(user_id):
+        return _err("User not found", 404)
 
     new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
     update_password(user_id, new_hash)

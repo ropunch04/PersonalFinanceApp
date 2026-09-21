@@ -87,10 +87,12 @@ def update_user(user_id: int, fields: dict) -> dict:
         raise ValueError("No updatable fields provided")
     set_clause = ", ".join(f"{col} = ?" for col in updates)
     with _connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             f"UPDATE users SET {set_clause} WHERE id = ?",
             [*updates.values(), user_id],
         )
+        if cur.rowcount == 0:
+            raise LookupError(f"User {user_id} not found")
         row = conn.execute(
             "SELECT id, username, email, is_admin, created_at, last_login_at FROM users WHERE id = ?",
             (user_id,),

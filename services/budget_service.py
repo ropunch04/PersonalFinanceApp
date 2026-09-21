@@ -82,6 +82,17 @@ def get_budget_summary(
     year_start = f"{year}-01-01"
     year_end   = f"{year}-12-31"
 
+    # `spent` here is ALWAYS scoped to the requested [start_date, end_date]
+    # window, for every category regardless of budget period. Previously a
+    # yearly-period category was joined against the *full calendar year* here
+    # while total_spent (above) and the trend/comparison endpoints were scoped
+    # to the requested window — so the category-breakdown donut (which sums
+    # these `spent` values) could show a full year of a yearly category's
+    # spend inside a one-month "Total Spent" tile. Also dropped the inflow
+    # subtraction that used to apply only here: total_spent and every other
+    # "spent" figure in the app already don't net inflows against spend (a
+    # refund is a reimbursement link or its own inflow, not negative expense),
+    # so this now uses the same definition everywhere — see spend_basis below.
     by_category = conn.execute(f"""
         SELECT
             c.id   AS category_id,
@@ -89,35 +100,50 @@ def get_budget_summary(
             c.is_misc AS is_misc,
             COALESCE(b.fold_into_misc, 0) AS fold_into_misc,
             COALESCE(b.period, 'monthly') AS period,
+            COALESCE(b.amount, 0) AS budget,
             COALESCE(SUM(
-                CASE WHEN t.direction = 'outflow' THEN  t.amount - {_excluded_sql("t")}
-                     WHEN t.direction = 'inflow'  THEN -{_inflow_income_sql("t")}
-                     ELSE 0 END
-            ), 0) AS spent,
-            COALESCE(b.amount, 0) AS budget
+                CASE WHEN t.direction = 'outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END
+            ), 0) AS spent
         FROM categories c
         LEFT JOIN budgets b ON b.category_id = c.id
-        LEFT JOIN transactions t ON t.category_id = c.id AND (
-            (COALESCE(b.period, 'monthly') = 'monthly' AND {w_join})
-            OR
-            (COALESCE(b.period, 'monthly') = 'yearly'  AND DATE(t.transaction_at) BETWEEN ? AND ?)
-        )
+        LEFT JOIN transactions t ON t.category_id = c.id AND t.direction = 'outflow' AND {w_join}
         GROUP BY c.id, c.name, c.is_misc, b.amount, b.period, b.fold_into_misc
         ORDER BY spent DESC
-    """, p + [year_start, year_end]).fetchall()
+    """, p).fetchall()
+
+    # Separately, a yearly-period category's *budget progress* (used for its
+    # remaining/over-budget state) tracks the whole calendar year, not just
+    # the viewed window — that's what "yearly" means. Computed independently
+    # of `spent` above so the two concerns (donut consistency vs. budget
+    # tracking) can't leak into each other again.
+    ytd_rows = conn.execute(f"""
+        SELECT c.id AS category_id,
+               COALESCE(SUM(
+                   CASE WHEN t.direction = 'outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END
+               ), 0) AS spent_ytd
+        FROM categories c
+        LEFT JOIN transactions t ON t.category_id = c.id AND t.direction = 'outflow'
+            AND DATE(t.transaction_at) BETWEEN ? AND ?
+        GROUP BY c.id
+    """, [year_start, year_end]).fetchall()
+    ytd_map = {r["category_id"]: r["spent_ytd"] for r in ytd_rows}
 
     entries = []
     for r in by_category:
-        budget = r["budget"] * month_count if r["period"] == "monthly" else r["budget"]
+        is_yearly = r["period"] == "yearly"
+        budget = r["budget"] if is_yearly else r["budget"] * month_count
+        spent_ytd = ytd_map.get(r["category_id"], 0) if is_yearly else None
+        basis_spent = spent_ytd if is_yearly else r["spent"]
         entries.append({
             "category_id":   r["category_id"],
             "category_name": r["category_name"],
             "period":        r["period"],
-            "spent":         r["spent"],
+            "spent":         r["spent"],       # window-scoped; sums to total_spent (+ uncategorized)
+            "spent_ytd":     spent_ytd,         # yearly categories only; drives their budget bar
             "budget":        budget,
             "is_misc":       bool(r["is_misc"]),
             "is_flex":       bool(r["fold_into_misc"]),
-            "remaining":     budget - r["spent"],
+            "remaining":     budget - basis_spent,
         })
 
     flex_entries = [e for e in entries if e["is_flex"]]
@@ -132,11 +158,18 @@ def get_budget_summary(
             "category_ids": [e["category_id"] for e in flex_entries],
         }
 
+    uncategorized_spent = round(total_spent - sum(e["spent"] for e in entries), 2)
+
     return {
         "total_spent":  total_spent,
         "total_income": total_income,
         "net":          total_income - total_spent,
         "pending_count": pending_count,
         "by_category": entries,
+        "uncategorized_spent": uncategorized_spent,
+        # Documents the definition so a client (or a future test) can check
+        # it: spend never nets inflows against it anywhere in this response.
+        # total_spent == sum(by_category[].spent) + uncategorized_spent.
+        "spend_basis": "gross_outflow_minus_reimbursed",
         "flex_pool": flex_pool,
     }

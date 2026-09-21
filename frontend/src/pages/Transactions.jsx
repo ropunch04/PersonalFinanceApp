@@ -377,13 +377,22 @@ function TxnForm({ initial, categories, onSave, onCancel, submitLabel }) {
 }
 
 
+// toISOString() converts to UTC first, so after ~19:00 ET this silently
+// pre-filled tomorrow's date instead of today's. Build the YYYY-MM-DD string
+// from local getters instead.
+function todayLocalDateString() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function AddModal({ categories, onClose, onSaved }) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [direction, setDirection] = useState("outflow");
   const [categoryId, setCategoryId] = useState(null);
   const [notes, setNotes] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayLocalDateString());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -690,12 +699,26 @@ export default function Transactions() {
     if (!confirm("Delete this transaction?")) return;
     try {
       await api.deleteTransaction(id);
-      const newTotal = total - 1;
-      const maxPage = Math.max(0, Math.ceil(newTotal / PAGE_SIZE) - 1);
-      fetchPage(Math.min(page, maxPage));
     } catch (err) {
-      alert(err.message);
+      // The backend refuses a delete that would silently cascade-delete
+      // linked reimbursements (409) — surface what it's warning about and
+      // let the user explicitly confirm through it, rather than dead-ending.
+      if (err.status === 409) {
+        if (!confirm(`${err.message}\n\nDelete anyway?`)) return;
+        try {
+          await api.deleteTransaction(id, { force: true });
+        } catch (err2) {
+          alert(err2.message);
+          return;
+        }
+      } else {
+        alert(err.message);
+        return;
+      }
     }
+    const newTotal = total - 1;
+    const maxPage = Math.max(0, Math.ceil(newTotal / PAGE_SIZE) - 1);
+    fetchPage(Math.min(page, maxPage));
   }
 
   function handleAdded() {

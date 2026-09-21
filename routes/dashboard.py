@@ -19,8 +19,11 @@ def _parse_include_ids(raw: str) -> list[int]:
         return []
 
 
-def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
+def _period_totals(
+    conn, start_str, end_str, pinned_ids: list[int] = None, exclude_ids: list[int] = None
+):
     ids = pinned_ids or []
+    excl = exclude_ids or []
     if ids:
         ph = ",".join("?" * len(ids))
         w_where = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
@@ -29,6 +32,16 @@ def _period_totals(conn, start_str, end_str, pinned_ids: list[int] = None):
         w_where = "DATE(transaction_at) BETWEEN ? AND ?"
         w_join  = "DATE(t.transaction_at) BETWEEN ? AND ?"
     p = [start_str, end_str] + ids
+    if excl:
+        # A pinned transaction is force-included in the *current* period's
+        # totals regardless of its real date. If its real date also falls
+        # inside a *previous* comparison window, that window's own plain
+        # date-range filter would count it again — exclude it here so a pin
+        # can't be double-counted across current + previous.
+        eph = ",".join("?" * len(excl))
+        w_where = f"({w_where}) AND id NOT IN ({eph})"
+        w_join  = f"({w_join}) AND t.id NOT IN ({eph})"
+        p = p + excl
 
     row = conn.execute(f"""
         SELECT
@@ -79,7 +92,6 @@ def dashboard_trend():
     end_str   = request.args.get("end_date")   or today.isoformat()
     start = date.fromisoformat(start_str)
     end   = date.fromisoformat(end_str)
-    pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
 
     span_days = (end - start).days
     granularity = request.args.get("granularity")
@@ -98,13 +110,16 @@ def dashboard_trend():
     else:
         group_expr = "strftime('%Y-%m', transaction_at)"
 
-    ids = pinned_ids or []
-    if ids:
-        ph = ",".join("?" * len(ids))
-        w = f"(DATE(transaction_at) BETWEEN ? AND ? OR id IN ({ph}))"
-    else:
-        w = "DATE(transaction_at) BETWEEN ? AND ?"
-    p = [start_str, end_str] + ids
+    # Deliberately does NOT include pinned/out-of-range transactions (unlike
+    # /dashboard and /comparison). The series here is built by walking fixed
+    # date/week/month buckets across [start, end]; a pin dated outside that
+    # span has no bucket to land in, so it used to be silently counted in the
+    # SQL total but then dropped by the densification loop below — the sum of
+    # this chart's bars could disagree with the dashboard tile it sits next
+    # to. Simpler and safer to exclude pins here entirely than to stretch the
+    # chart's bucket range out to cover an arbitrary pinned date.
+    w = "DATE(transaction_at) BETWEEN ? AND ?"
+    p = [start_str, end_str]
 
     rows = conn.execute(f"""
         SELECT
@@ -243,15 +258,26 @@ def dashboard_comparison():
     pinned_ids = _parse_include_ids(request.args.get("include_ids", ""))
 
     span = (end - start).days + 1
-    if start.day == 1:
+    is_complete_month = (
+        start.day == 1
+        and end == date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
+        and end < today
+    )
+    if is_complete_month:
+        # A fully-elapsed calendar month ("Last Month") — compare against the
+        # one full calendar month before it.
         prev_end   = start - timedelta(days=1)
         prev_start = prev_end.replace(day=1)
     else:
+        # A partial/in-progress period ("This Month" as of today, or any
+        # custom range) — comparing it to a *full* previous month over- or
+        # under-states the delta. Match the same number of elapsed days
+        # instead: e.g. Sep 1-10 vs Aug 22-31, not Sep 1-10 vs all of August.
         prev_start = start - timedelta(days=span)
         prev_end   = start - timedelta(days=1)
 
     current  = _period_totals(conn, start_str, end_str, pinned_ids)
-    previous = _period_totals(conn, prev_start.isoformat(), prev_end.isoformat())
+    previous = _period_totals(conn, prev_start.isoformat(), prev_end.isoformat(), exclude_ids=pinned_ids)
     has_prev = previous["spent"] > 0 or previous["income"] > 0
 
     ids = pinned_ids or []
@@ -269,14 +295,20 @@ def dashboard_comparison():
         LEFT JOIN transactions t ON t.category_id=c.id AND {cur_join}
         GROUP BY c.id, c.name
     """, cur_p).fetchall()
+    prev_excl_join = ""
+    prev_p = [prev_start.isoformat(), prev_end.isoformat()]
+    if ids:
+        prev_excl_join = f" AND t.id NOT IN ({ph})"
+        prev_p = prev_p + ids
+
     prev_cats = conn.execute(f"""
         SELECT c.id,
                COALESCE(SUM(CASE WHEN t.direction='outflow' THEN t.amount - {_excluded_sql("t")} ELSE 0 END),0) AS spent
         FROM categories c
         LEFT JOIN transactions t ON t.category_id=c.id
-            AND DATE(t.transaction_at) BETWEEN ? AND ?
+            AND DATE(t.transaction_at) BETWEEN ? AND ?{prev_excl_join}
         GROUP BY c.id
-    """, (prev_start.isoformat(), prev_end.isoformat())).fetchall()
+    """, prev_p).fetchall()
 
     prev_map = {r["id"]: r["spent"] for r in prev_cats}
     biggest  = None
@@ -308,6 +340,13 @@ def dashboard_comparison():
             "days_elapsed":    days_elapsed,
             "days_in_month":   days_in_month,
         }
+
+    if has_prev:
+        # Echoed explicitly so the frontend (ComparisonCard.jsx) doesn't have
+        # to re-derive "the previous period" from start_date alone — its old
+        # guess (always "one calendar month back") was wrong for any range
+        # that isn't a plain first-of-month-to-today month.
+        previous = {**previous, "start_date": prev_start.isoformat(), "end_date": prev_end.isoformat()}
 
     return {"data": {
         "current":                 current,

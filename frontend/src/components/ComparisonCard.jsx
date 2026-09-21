@@ -13,12 +13,20 @@ function periodLabel(dateParams) {
   } catch { return "—"; }
 }
 
-function prevPeriodLabel(dateParams) {
-  if (!dateParams?.start_date) return "—";
+// The backend echoes the actual previous window it compared against
+// (routes/dashboard.py) — it isn't always "one calendar month back" (a
+// partial current month compares against a matching number of elapsed days
+// instead), so render whatever it says rather than re-deriving a guess here.
+function prevPeriodLabel(previous) {
+  if (!previous?.start_date || !previous?.end_date) return "—";
   try {
-    const d = new Date(dateParams.start_date + "T00:00:00");
-    d.setMonth(d.getMonth() - 1);
-    return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    const start = new Date(previous.start_date + "T00:00:00");
+    const end   = new Date(previous.end_date + "T00:00:00");
+    const fmtOpts = { month: "short", day: "numeric" };
+    if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+      return end.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    }
+    return `${start.toLocaleDateString("en-US", fmtOpts)} – ${end.toLocaleDateString("en-US", fmtOpts)}`;
   } catch { return "—"; }
 }
 
@@ -88,7 +96,7 @@ export default function ComparisonCard({ dateParams }) {
   const { current, previous, deltas, biggest_change_category, velocity } = data;
   const noPrev = !previous;
   const curLabel  = periodLabel(dateParams);
-  const prevLabel = prevPeriodLabel(dateParams);
+  const prevLabel = prevPeriodLabel(previous);
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>

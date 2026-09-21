@@ -85,7 +85,9 @@ export default function SpendingTrendChart({ dateParams }) {
             axisLine={false}
             tickLine={false}
             tick={{ fill: "#475569", fontSize: 10 }}
-            tickFormatter={(v) => `$${Math.round(v / 1000) > 0 ? `${Math.round(v / 1000)}k` : v}`}
+            // Math.round(600/1000) is 1, which used to render $600 as "$1k".
+            // A value only becomes "Nk" once it's actually at or past 1000.
+            tickFormatter={(v) => (v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`)}
           />
           <Tooltip content={<CustomTooltip />} />
           <Line

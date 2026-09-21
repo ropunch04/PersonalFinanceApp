@@ -67,37 +67,50 @@ export function useDashboardFilters() {
   );
   const [pinnedIds, setPinnedIds] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(PINNED_KEY) ?? "[]");
+      const parsed = JSON.parse(localStorage.getItem(PINNED_KEY) ?? "[]");
+      // A non-array here (corrupted storage, a future format change) used to
+      // white-screen the whole app the moment Dashboard.jsx called
+      // pinnedIds.map(...) / .includes(...) on it.
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
   });
 
+  function _safeSetItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Private browsing / storage quota / disabled storage — the app should
+      // keep working with in-memory state rather than throw here.
+    }
+  }
+
   function setRange(r) {
-    localStorage.setItem(STORAGE_KEY, r);
+    _safeSetItem(STORAGE_KEY, r);
     setRangeState(r);
   }
 
   function setCustomStart(v) {
-    localStorage.setItem(CUSTOM_START_KEY, v);
+    _safeSetItem(CUSTOM_START_KEY, v);
     setCustomStartState(v);
   }
 
   function setCustomEnd(v) {
-    localStorage.setItem(CUSTOM_END_KEY, v);
+    _safeSetItem(CUSTOM_END_KEY, v);
     setCustomEndState(v);
   }
 
   function togglePin(id) {
     setPinnedIds((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      localStorage.setItem(PINNED_KEY, JSON.stringify(next));
+      _safeSetItem(PINNED_KEY, JSON.stringify(next));
       return next;
     });
   }
 
   function clearPins() {
-    localStorage.setItem(PINNED_KEY, "[]");
+    _safeSetItem(PINNED_KEY, "[]");
     setPinnedIds([]);
   }
 

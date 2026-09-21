@@ -24,7 +24,13 @@ export default function DuplicatesModal({ onClose, onDeleted }) {
   async function handleDelete(id) {
     setDeleting(id);
     try {
-      await api.deleteTransaction(id);
+      try {
+        await api.deleteTransaction(id);
+      } catch (e) {
+        if (e.status !== 409) throw e;
+        if (!confirm(`${e.message}\n\nDelete anyway?`)) return;
+        await api.deleteTransaction(id, { force: true });
+      }
       setGroups((prev) =>
         prev
           .map((g) => g.filter((t) => t.id !== id))
@@ -35,13 +41,6 @@ export default function DuplicatesModal({ onClose, onDeleted }) {
       alert("Error: " + e.message);
     } finally {
       setDeleting(null);
-    }
-  }
-
-  async function handleKeepFirst(group) {
-    const toDelete = group.slice(1);
-    for (const t of toDelete) {
-      await handleDelete(t.id);
     }
   }
 
@@ -82,14 +81,6 @@ export default function DuplicatesModal({ onClose, onDeleted }) {
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
                       {group[0].merchant_raw || "Unknown"} · {fmtDate(group[0].transaction_at)} · {fmt(group[0].amount)}
                     </span>
-                    <button
-                      className="btn btn-sm"
-                      style={{ fontSize: 11, padding: "3px 10px", opacity: deleting ? 0.5 : 1 }}
-                      disabled={!!deleting}
-                      onClick={() => handleKeepFirst(group)}
-                    >
-                      Keep first, delete rest
-                    </button>
                   </div>
 
                   {group.map((t, ti) => (

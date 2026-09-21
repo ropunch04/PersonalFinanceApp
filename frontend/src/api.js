@@ -1,5 +1,30 @@
 const TOKEN_KEY = "finance_token";
 
+// Parses a fetch Response into our {data, error} envelope. Status is checked
+// BEFORE parsing so a non-JSON error body (a 413 from a proxy, an HTML 502
+// from the tunnel, an empty body) never throws "Unexpected token '<'" instead
+// of a readable message.
+async function _parseResponse(res) {
+  const ct = res.headers.get("content-type") || "";
+  const json = ct.includes("application/json") ? await res.json().catch(() => ({})) : {};
+
+  if (res.status === 401) {
+    const hadToken = !!localStorage.getItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    if (hadToken) {
+      window.location.href = "/login";
+      return undefined;
+    }
+    throw new Error(json.error || "Invalid credentials");
+  }
+  if (!res.ok) {
+    const err = new Error(json.error || `Request failed (${res.status})`);
+    err.status = res.status; // lets callers branch on e.g. a 409 needing confirmation
+    throw err;
+  }
+  return json.data;
+}
+
 async function request(method, path, body = null) {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = { "Content-Type": "application/json" };
@@ -11,18 +36,7 @@ async function request(method, path, body = null) {
     body: body ? JSON.stringify(body) : null,
   });
 
-  const json = await res.json();
-  if (res.status === 401) {
-    const hadToken = !!localStorage.getItem(TOKEN_KEY);
-    localStorage.removeItem(TOKEN_KEY);
-    if (hadToken) {
-      window.location.href = "/login";
-      return;
-    }
-    throw new Error(json.error || "Invalid credentials");
-  }
-  if (!res.ok) throw new Error(json.error || "Request failed");
-  return json.data;
+  return _parseResponse(res);
 }
 
 export const api = {
@@ -75,7 +89,8 @@ export const api = {
   createTransaction: (data) => request("POST", "/api/transactions", data),
   updateTransaction: (id, data) =>
     request("PUT", `/api/transactions/${id}`, data),
-  deleteTransaction: (id) => request("DELETE", `/api/transactions/${id}`),
+  deleteTransaction: (id, { force = false } = {}) =>
+    request("DELETE", `/api/transactions/${id}${force ? "?force=true" : ""}`),
   bulkCategorize: (merchant_raw, category_id) =>
     request("POST", "/api/transactions/bulk-categorize", { merchant_raw, category_id }),
   reclassify: (merchant_raw, from_category_id, to_category_id) =>
@@ -108,16 +123,7 @@ export const api = {
     const headers = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     return fetch("/api/import/transactions", { method: "POST", headers, body: form }).then(
-      async (res) => {
-        const json = await res.json();
-        if (res.status === 401) {
-          localStorage.removeItem(TOKEN_KEY);
-          window.location.href = "/login";
-          return;
-        }
-        if (!res.ok) throw new Error(json.error || "Request failed");
-        return json.data;
-      }
+      _parseResponse
     );
   },
 

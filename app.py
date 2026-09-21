@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, g, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import config
@@ -64,6 +65,26 @@ def close_user_db(_):
     db = g.pop("user_db", None)
     if db is not None:
         db.close()
+
+
+# Every response — success or failure — uses the same {"data": ..., "error": ...}
+# envelope. Without these two handlers, any exception (a 413 from MAX_CONTENT_LENGTH,
+# a 429 from Flask-Limiter, an uncaught 500) falls through to Flask/Werkzeug's default
+# HTML error page, which api.js's res.json() then fails to parse.
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc):
+    return {"data": None, "error": exc.description}, exc.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_exception(exc):
+    app.logger.exception("Unhandled exception")
+    return {"data": None, "error": "An unexpected error occurred"}, 500
+
+
+@app.route("/api/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+def api_not_found(path):
+    return {"data": None, "error": "Not found"}, 404
 
 
 @app.after_request

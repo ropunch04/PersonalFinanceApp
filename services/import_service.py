@@ -111,8 +111,16 @@ def parse_amex_csv(stream, conn) -> tuple[list[dict], list[dict]]:
 def parse_venmo_csv(stream, conn) -> tuple[list[dict], list[dict]]:
     transactions, errors = [], []
 
-    next(stream)
-    next(stream)
+    # Venmo's CSV has two banner lines before the header row. A short file (or
+    # a file of the wrong source type entirely) has fewer than two lines,
+    # which used to raise an unguarded StopIteration -> 500 instead of a
+    # readable error.
+    try:
+        next(stream)
+        next(stream)
+    except StopIteration:
+        errors.append({"row": 1, "reason": "File is too short to be a Venmo export", "data": {}})
+        return transactions, errors
 
     reader = csv.DictReader(stream)
     for row_num, row in enumerate(reader, start=4):

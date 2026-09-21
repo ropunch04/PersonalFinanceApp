@@ -21,6 +21,17 @@ bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 _GENERIC_LOGIN_ERROR = {"error": "Invalid credentials"}
 
+# bcrypt (as of 5.0.0) raises ValueError on a password whose UTF-8 encoding
+# exceeds 72 bytes, rather than truncating it. Every endpoint that hashes or
+# checks a password must reject long ones *before* calling bcrypt — silently
+# truncating instead would let two different passwords authenticate as the
+# same account.
+_MAX_PASSWORD_BYTES = 72
+
+
+def _password_too_long(password: str) -> bool:
+    return len(password.encode()) > _MAX_PASSWORD_BYTES
+
 
 @bp.post("/register")
 @limiter.limit("10 per hour")
@@ -38,6 +49,9 @@ def register():
 
     if len(password) < 8:
         return {"error": "Password must be at least 8 characters"}, 400
+
+    if _password_too_long(password):
+        return {"error": f"Password must be at most {_MAX_PASSWORD_BYTES} bytes"}, 400
 
     if get_user_by_username(username):
         return {"error": "Username already taken"}, 409
@@ -73,7 +87,17 @@ def login():
     if not row:
         return _GENERIC_LOGIN_ERROR, 401
 
-    if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+    # A too-long password can never match a stored hash; treat it as a normal
+    # wrong-password case (401) instead of letting bcrypt raise ValueError (500).
+    # Login is unauthenticated and only rate-limited per-IP, so this is directly
+    # reachable by anyone.
+    if _password_too_long(password):
+        return _GENERIC_LOGIN_ERROR, 401
+
+    try:
+        if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+            return _GENERIC_LOGIN_ERROR, 401
+    except ValueError:
         return _GENERIC_LOGIN_ERROR, 401
 
     init_user_db(row["id"])
@@ -112,8 +136,20 @@ def change_password():
     if len(new_password) < 8:
         return {"error": "new_password must be at least 8 characters"}, 400
 
+    if _password_too_long(new_password):
+        return {"error": f"new_password must be at most {_MAX_PASSWORD_BYTES} bytes"}, 400
+
     row = get_user_by_id(g.current_user["user_id"])
-    if not row or not bcrypt.checkpw(current_password.encode(), row["password_hash"].encode()):
+    if not row:
+        return {"error": "Current password is incorrect"}, 400
+
+    try:
+        current_ok = not _password_too_long(current_password) and bcrypt.checkpw(
+            current_password.encode(), row["password_hash"].encode()
+        )
+    except ValueError:
+        current_ok = False
+    if not current_ok:
         return {"error": "Current password is incorrect"}, 400
 
     new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()

@@ -39,19 +39,41 @@ def _row_to_dict(row) -> dict:
     return dict(row)
 
 
+def _detach_references(db, txn_id: int) -> None:
+    """Clear the legacy reimburses_id pointer on any row that references
+    txn_id, so deleting/splitting txn_id doesn't hit an IntegrityError under
+    PRAGMA foreign_keys=ON. Must run in the same transaction as the delete."""
+    db.execute("UPDATE transactions SET reimburses_id = NULL WHERE reimburses_id = ?", (txn_id,))
+
+
+def _linked_reimbursement_count(db, txn_id: int) -> int:
+    return db.execute(
+        "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ? OR inflow_id = ?",
+        (txn_id, txn_id),
+    ).fetchone()["n"]
+
+
+def _like_escape(raw: str) -> str:
+    """Escapes %, _, and \\ for a LIKE pattern using ESCAPE '\\'. Without this,
+    a merchant name that itself contains % or _ (7 in prod) turns a prefix
+    match into an unintended wildcard match."""
+    return raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @bp.get("/transactions")
 @require_auth
 def list_transactions():
     db = get_user_db(g.current_user["user_id"])
 
-    try:
-        category_id = request.args.get("category_id", type=int)
-        limit = min(request.args.get("limit", default=25, type=int), 200)
-        offset = max(request.args.get("offset", default=0, type=int), 0)
-        date_from = request.args.get("date_from")
-        date_to = request.args.get("date_to")
-    except (TypeError, ValueError):
-        return _err("Invalid query parameters", 400)
+    category_id = request.args.get("category_id", type=int)
+    # request.args.get(type=int) returns the default on a bad value instead of
+    # raising, so the try/except this used to be wrapped in never actually
+    # fired — bad input was silently coerced rather than rejected. `?limit=-1`
+    # in particular became `LIMIT -1`, i.e. unlimited, in the query below.
+    limit = max(1, min(request.args.get("limit", default=25, type=int), 200))
+    offset = max(request.args.get("offset", default=0, type=int), 0)
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
 
     uncategorized = request.args.get("uncategorized", "false").lower() == "true"
     status = request.args.get("status")
@@ -61,11 +83,13 @@ def list_transactions():
     where_clauses = []
     params: list = []
 
+    # Independent AND clauses — status and category_id used to be an if/elif,
+    # so picking both in the UI silently dropped one of them.
     if uncategorized or status == "pending":
         where_clauses.append("t.category_id IS NULL AND t.direction = 'outflow'")
     elif status == "confirmed":
         where_clauses.append("t.category_id IS NOT NULL")
-    elif category_id is not None:
+    if category_id is not None:
         where_clauses.append("t.category_id = ?")
         params.append(category_id)
     if date_from:
@@ -75,10 +99,14 @@ def list_transactions():
         where_clauses.append("t.transaction_at <= ?")
         params.append(date_to + "T23:59:59")
     if q:
+        # Escape LIKE's own wildcard characters in user input so a merchant
+        # name containing a literal % or _ (7 in prod) is matched exactly
+        # instead of as a wildcard.
         where_clauses.append(
-            "(t.merchant_raw LIKE ? OR t.notes LIKE ? OR CAST(t.amount AS TEXT) LIKE ?)"
+            "(t.merchant_raw LIKE ? ESCAPE '\\' OR t.notes LIKE ? ESCAPE '\\' "
+            "OR CAST(t.amount AS TEXT) LIKE ? ESCAPE '\\')"
         )
-        like = f"%{q}%"
+        like = f"%{_like_escape(q)}%"
         params.extend([like, like, like])
     if source == "venmo":
         where_clauses.append("(t.notes LIKE 'venmo:%' OR t.notes = 'venmo')")
@@ -148,6 +176,9 @@ def create_transaction():
         amount = float(amount)
     except (TypeError, ValueError):
         return _err("amount must be a number", 400)
+
+    if amount < 0:
+        return _err("amount cannot be negative", 400)
 
     if direction not in ("inflow", "outflow"):
         return _err("direction must be 'inflow' or 'outflow'", 400)
@@ -312,7 +343,19 @@ def delete_transaction(txn_id):
     if existing is None:
         return _err("Transaction not found", 404)
 
-    db.execute("UPDATE transactions SET reimburses_id = NULL WHERE reimburses_id = ?", (txn_id,))
+    # reimbursement_links rows pointing at this transaction cascade-delete
+    # silently (ON DELETE CASCADE). Require the caller to acknowledge that
+    # before it happens, unless update_transaction's own direction-flip guard
+    # already would have refused — deletion is the one path that doesn't ask.
+    linked = _linked_reimbursement_count(db, txn_id)
+    if linked > 0 and request.args.get("force", "").lower() != "true":
+        return _err(
+            f"This will also remove {linked} linked reimbursement"
+            f"{'s' if linked != 1 else ''} — pass ?force=true to confirm",
+            409,
+        )
+
+    _detach_references(db, txn_id)
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     db.commit()
     return _ok({"deleted": True})
@@ -365,10 +408,7 @@ def split_transaction(txn_id):
     if existing["expected_reimbursement"] is not None:
         return _err("Clear this transaction's reimbursement expectation before splitting it", 409)
 
-    linked = db.execute(
-        "SELECT COUNT(*) AS n FROM reimbursement_links WHERE outflow_id = ? OR inflow_id = ?",
-        (txn_id, txn_id),
-    ).fetchone()["n"]
+    linked = _linked_reimbursement_count(db, txn_id)
     if linked > 0:
         return _err(
             "This transaction has linked reimbursement payments — unlink those before splitting it",
@@ -377,7 +417,10 @@ def split_transaction(txn_id):
 
     # Delete the original first (within this same uncommitted transaction) so
     # inserting a new row that reuses its source_hash below doesn't collide
-    # with the UNIQUE constraint.
+    # with the UNIQUE constraint. Detach first — otherwise, with
+    # PRAGMA foreign_keys=ON, deleting a row another transaction's
+    # reimburses_id still points at raises an IntegrityError (500).
+    _detach_references(db, txn_id)
     db.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
 
     created_ids = []
@@ -471,12 +514,12 @@ def auto_classify():
             """
             SELECT category_id, COUNT(*) AS freq
             FROM transactions
-            WHERE category_id IS NOT NULL AND merchant_raw LIKE ?
+            WHERE category_id IS NOT NULL AND merchant_raw LIKE ? ESCAPE '\\'
             GROUP BY category_id
             ORDER BY freq DESC
             LIMIT 1
             """,
-            (f"{prefix}%",),
+            (f"{_like_escape(prefix)}%",),
         ).fetchone()
 
         if best:
@@ -506,8 +549,13 @@ def bulk_categorize():
 
     prefix = merchant_prefix(merchant_raw)
     result = db.execute(
-        "UPDATE transactions SET category_id = ? WHERE category_id IS NULL AND merchant_raw LIKE ?",
-        (category_id, f"{prefix}%"),
+        # direction='outflow' matches the unclassified-merchants list this is
+        # driven from (:489) — without it, an inflow sharing the same prefix
+        # (e.g. a refund) got silently categorized too, though the user never
+        # saw it in the list they picked "categorize all of these" from.
+        "UPDATE transactions SET category_id = ? "
+        "WHERE category_id IS NULL AND direction = 'outflow' AND merchant_raw LIKE ? ESCAPE '\\'",
+        (category_id, f"{_like_escape(prefix)}%"),
     )
     db.commit()
     return _ok({"updated": result.rowcount, "prefix": prefix})
@@ -529,8 +577,8 @@ def reclassify():
 
     prefix = merchant_prefix(merchant_raw)
     result = db.execute(
-        "UPDATE transactions SET category_id = ? WHERE category_id = ? AND merchant_raw LIKE ?",
-        (to_id, from_id, f"{prefix}%"),
+        "UPDATE transactions SET category_id = ? WHERE category_id = ? AND merchant_raw LIKE ? ESCAPE '\\'",
+        (to_id, from_id, f"{_like_escape(prefix)}%"),
     )
     db.commit()
     return _ok({"updated": result.rowcount, "prefix": prefix})
@@ -546,8 +594,8 @@ def linkable_outflows():
     where = "WHERE t.direction = 'outflow' AND t.reimbursement_external = 0"
     params = []
     if q:
-        where += " AND t.merchant_raw LIKE ?"
-        params.append(f"%{q}%")
+        where += " AND t.merchant_raw LIKE ? ESCAPE '\\'"
+        params.append(f"%{_like_escape(q)}%")
 
     rows = db.execute(f"""
         SELECT t.id, t.amount, t.merchant_raw, t.transaction_at,
@@ -578,7 +626,16 @@ def find_duplicates():
             SELECT transaction_at, amount, merchant_raw, direction
             FROM transactions
             GROUP BY transaction_at, amount, merchant_raw, direction
+            -- Two rows independently ingested (each with its own non-null
+            -- source_hash) are two real transactions that happen to match on
+            -- these fields, not a duplicate — e.g. two identical vending-
+            -- machine purchases the same day. Only flag a group where fewer
+            -- distinct source_hash values exist than rows: either some rows
+            -- share a hash (shouldn't happen, UNIQUE), or at least one row
+            -- has no hash at all (manual entry / older import) and so can't
+            -- be told apart from a real duplicate by hash alone.
             HAVING COUNT(*) > 1
+               AND COUNT(DISTINCT source_hash) < COUNT(*)
         ) dups
             ON  t.transaction_at = dups.transaction_at
             AND t.amount         = dups.amount

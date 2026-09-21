@@ -376,7 +376,13 @@ def fetch_emails(gmail_address: str, app_password: str, conn=None) -> tuple[list
 
             for num in ids:
                 try:
-                    _, data = mail.fetch(num, "(RFC822)")
+                    # BODY.PEEK[] fetches the message without the server implicitly
+                    # marking it \Seen. The search filter above is UNSEEN, so if we
+                    # used RFC822 here (which does mark it seen) a message our parser
+                    # fails on would be marked read and never seen again — permanent,
+                    # silent data loss. We only mark it \Seen ourselves, below, once
+                    # parsing has actually succeeded.
+                    _, data = mail.fetch(num, "(BODY.PEEK[])")
                     raw = data[0][1]
                     msg = message_from_bytes(raw)
                     message_id = msg.get("Message-ID", num.decode())

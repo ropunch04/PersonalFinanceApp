@@ -111,7 +111,10 @@ export default function Import() {
           {result.errors?.length > 0 && (
             <div className="import-errors">
               {result.errors.map((e, i) => (
-                <div key={i} className="import-error-item">{e}</div>
+                <div key={i} className="import-error-item">
+                  {e.row != null ? `Row ${e.row}: ` : e.file ? `${e.file}: ` : ""}
+                  {e.reason || "Unknown error"}
+                </div>
               ))}
             </div>
           )}
