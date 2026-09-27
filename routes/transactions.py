@@ -10,7 +10,7 @@ from services.categorize import merchant_prefix, resolve_category_id
 
 bp = Blueprint("transactions", __name__, url_prefix="/api")
 
-_TXN_SELECT = f"""
+_TXN_SELECT = """
     SELECT t.id, t.amount, t.merchant_raw, t.direction, t.category_id,
            c.name AS category_name, t.notes, t.transaction_at, t.created_at,
            t.awaiting_reimbursement,

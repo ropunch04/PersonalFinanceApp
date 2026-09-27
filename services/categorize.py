@@ -22,25 +22,21 @@ def merchant_prefix(name: str) -> str:
     cleaned = re.sub(r"\s+[#*]?\d{3,}.*$", "", name.strip()).strip()
     return cleaned if cleaned else name.strip()
 
+_SNAPSHOT_SQL = """
+    SELECT merchant_raw, category_id, COUNT(*) AS n, MAX(transaction_at) AS last_at
+    FROM transactions
+    WHERE category_id IS NOT NULL
+      AND merchant_raw IS NOT NULL
+      AND (notes IS NULL OR notes NOT LIKE 'venmo:%')
+    GROUP BY merchant_raw, category_id
+"""
 
-def resolve_category_id(conn, merchant_raw: str) -> int | None:
-    if conn is None or not merchant_raw:
-        return None
+
+def _score_against(rows, merchant_raw: str) -> int | None:
     target = merchant_raw.strip().upper()
     if not target:
         return None
     target_group = merchant_prefix(merchant_raw).upper()
-
-    rows = conn.execute(
-        """
-        SELECT merchant_raw, category_id, COUNT(*) AS n, MAX(transaction_at) AS last_at
-        FROM transactions
-        WHERE category_id IS NOT NULL
-          AND merchant_raw IS NOT NULL
-          AND (notes IS NULL OR notes NOT LIKE 'venmo:%')
-        GROUP BY merchant_raw, category_id
-        """
-    ).fetchall()
 
     best_rank = None
     best_category = None
@@ -68,3 +64,25 @@ def resolve_category_id(conn, merchant_raw: str) -> int | None:
             best_rank = rank
             best_category = row["category_id"]
     return best_category
+
+
+def resolve_category_id(conn, merchant_raw: str) -> int | None:
+    if conn is None or not merchant_raw:
+        return None
+    return _score_against(conn.execute(_SNAPSHOT_SQL).fetchall(), merchant_raw)
+
+
+def build_category_resolver(conn):
+    """Returns a resolver that reuses one snapshot of the merchant history.
+
+    `resolve_category_id` re-runs the GROUP BY scan on every call, which is
+    fine for the handful of rows an email sync produces but is the same scan
+    repeated once per row on a CSV import — seconds of identical work on a
+    year of history, growing with the table. Inserts happen after parsing
+    completes, so a snapshot taken up front is as current as the per-row
+    query was anyway.
+    """
+    if conn is None:
+        return lambda merchant_raw: None
+    rows = conn.execute(_SNAPSHOT_SQL).fetchall()
+    return lambda merchant_raw: _score_against(rows, merchant_raw) if merchant_raw else None

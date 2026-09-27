@@ -121,6 +121,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
 
+    # Drops the short-lived 'subscriptions' table (added, then pulled back out
+    # before it ever shipped) on any DB that already has it. No-op on a DB
+    # that never got it.
+    conn.execute("DROP TABLE IF EXISTS subscriptions")
+    conn.commit()
+
     _migrate_reimbursements(conn)
     _migrate_awaiting_reimbursement(conn)
     rows = conn.execute("SELECT id FROM categories ORDER BY sort_order, name").fetchall()

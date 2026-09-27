@@ -15,7 +15,7 @@ from flask import Blueprint, g, request
 from auth.middleware import require_auth
 from db_context import get_user_db
 from routes.helpers import _err, _ok
-from services.budget_service import _reimbursement_gap_sql, _received_sql
+from services.budget_service import _received_sql, _reimbursement_gap_sql
 
 bp = Blueprint("reimbursements", __name__, url_prefix="/api")
 

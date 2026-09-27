@@ -743,7 +743,6 @@ export default function Transactions() {
     try {
       const updated = await api.updateTransaction(txn.id, payload);
       setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setExpectEditId(null);
     } catch (err) {
       alert(err.message);
     } finally {

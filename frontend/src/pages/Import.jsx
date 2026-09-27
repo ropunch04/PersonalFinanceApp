@@ -2,9 +2,13 @@ import { useState } from "react";
 import { api } from "../api";
 
 const SOURCE_TYPES = [
-  { value: "capitalone", label: "Capital One" },
-  { value: "venmo", label: "Venmo" },
-  { value: "amex", label: "Amex" },
+  {
+    value: "capitalone",
+    label: "Capital One",
+    hint: "Card statement or 360 checking/savings export — both work here.",
+  },
+  { value: "venmo", label: "Venmo", hint: "Personal statement export (the one with the two banner rows)." },
+  { value: "amex", label: "Amex", hint: "Standard transaction export, including the Reference column." },
 ];
 
 export default function Import() {
@@ -81,7 +85,11 @@ export default function Import() {
               or drag and drop here
             </div>
           )}
-          {files.length === 0 && <div className="drop-zone-hint">Supports Capital One, Venmo, and Amex exports</div>}
+          {files.length === 0 && (
+            <div className="drop-zone-hint">
+              {SOURCE_TYPES.find((s) => s.value === sourceType)?.hint}
+            </div>
+          )}
         </div>
 
         {error && <div className="msg msg-error" style={{ marginBottom: 12 }}>{error}</div>}
@@ -107,6 +115,25 @@ export default function Import() {
             <div className="import-stat grey">
               {result.duplicates_skipped} duplicate{result.duplicates_skipped !== 1 ? "s" : ""} skipped
             </div>
+          )}
+          {(result.skipped_internal_total ?? 0) > 0 && (
+            <details className="import-stat grey" style={{ display: "block" }}>
+              <summary style={{ cursor: "pointer" }}>
+                {result.skipped_internal_total} row
+                {result.skipped_internal_total !== 1 ? "s" : ""} skipped as already counted
+              </summary>
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                Transfers between your own accounts, credit-card payments, and Venmo/Zelle
+                movement already imported from their own sources — counting these again would
+                double your totals.
+                {result.skipped_internal.map((s, i) => (
+                  <div key={i} style={{ marginTop: 4 }}>
+                    {s.count > 1 ? `${s.count}× ` : ""}{s.description}
+                    <span style={{ opacity: 0.7 }}> — {s.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           {result.errors?.length > 0 && (
             <div className="import-errors">
